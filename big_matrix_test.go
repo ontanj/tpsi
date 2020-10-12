@@ -78,6 +78,35 @@ func TestAt(t *testing.T) {
             col += 1
         }
     }
+    t.Run("index out of bounds", func (t *testing.T) {
+        defer func() {
+            if recover() == nil {
+                t.Error("didn't panic on index out of bounds")
+            }
+        }()
+        m.At(0,3)
+    })
+}
+
+func TestSet(t *testing.T) {
+    a := NewBigMatrix(2, 2, sliceToBigInt([]int64{1,2,3,4}))
+    b := NewBigMatrix(2, 2, sliceToBigInt([]int64{1,2,5,4}))
+    a.Set(1,0,big.NewInt(5))
+    for i := 0; i < 2; i++ {
+        for j:= 0; j < 2; j++ {
+            if a.At(i,j).Cmp(b.At(i,j)) != 0 {
+                t.Error("Value error in set")
+            }
+        }
+    }
+    t.Run("index out of bounds", func (t *testing.T) {
+        defer func() {
+            if recover() == nil {
+                t.Error("didn't panic on index out of bounds")
+            }
+        }()
+        a.Set(0,3,big.NewInt(10))
+    })
 }
 
 func TestMultiplication(t *testing.T) {
@@ -171,4 +200,18 @@ func TestSubtraction(t *testing.T) {
         f := NewBigMatrix(2,3,nil)	
         MatSub(a, f)
     })
+}
+
+func TestScalarMultiplication(t *testing.T) {
+    a := NewBigMatrix(2, 3, sliceToBigInt([]int64{3, 4, 2, 1, 8, 5}))
+    b := int64(2)
+    c := NewBigMatrix(2, 3, sliceToBigInt([]int64{6, 8, 4, 2, 16, 10}))
+    d := MatScaMul(a, b)
+    for i := 0; i < 2; i++ {
+        for j := 0; j < 3; j++ {
+            if d.At(i, j).Cmp(c.At(i, j)) != 0 {
+                t.Error("error in scalar multiplication")
+            }
+        }
+    }
 }

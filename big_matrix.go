@@ -3,6 +3,7 @@ package tpsi
 import (
     "math/big"
     "errors"
+    "fmt"
 )
 
 type BigMatrix struct {
@@ -10,7 +11,7 @@ type BigMatrix struct {
     rows, cols int
 }
 
-// Create a new 0-index BigMatrix with the given size and data. Produces an error if size and data mismatch.
+// Create a new 0-index BigMatrix with the given size and data. Panics if size and data mismatch.
 func NewBigMatrix(rows, cols int, data []*big.Int) BigMatrix {
     if data == nil {
         data = make([]*big.Int, rows*cols)
@@ -28,12 +29,22 @@ func NewBigMatrix(rows, cols int, data []*big.Int) BigMatrix {
 }
 
 func (m BigMatrix) At(row, col int) *big.Int {
+    if row >= m.rows || col >= m.cols || row < 0 || col < 0{
+        panic(errors.New(fmt.Sprintf("Index out of bounds: (%d, %d)", row, col)))
+    }
     valueIndex := m.cols*row + col
     return m.values[valueIndex]
 }
 
+func (m BigMatrix) Set(row, col int, value *big.Int) {
+    if row >= m.rows || col >= m.cols || row < 0 || col < 0 {
+        panic(errors.New(fmt.Sprintf("Index out of bounds: (%d, %d)", row, col)))
+    }
+    m.values[m.cols*row + col] = value
+}
+
 func MatMul(a, b BigMatrix) BigMatrix {
-    if a.cols != a.rows {
+    if a.cols != b.rows {
         panic(errors.New("matrices a and b are not compatible"))
     }
     cRows, cCols := a.rows, b.cols
@@ -74,6 +85,15 @@ func MatSub(a, b BigMatrix) BigMatrix {
     c := NewBigMatrix(a.rows, a.cols, nil)
     for i := range c.values {
         c.values[i].Sub(a.values[i], b.values[i])
+    }
+    return c
+}
+
+func MatScaMul(a BigMatrix, b int64) BigMatrix {
+    c := NewBigMatrix(a.rows, a.cols, nil)
+    bb := big.NewInt(b)
+    for i := range c.values {
+        c.values[i].Mul(a.values[i], bb)
     }
     return c
 }
