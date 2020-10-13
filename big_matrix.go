@@ -4,6 +4,7 @@ import (
     "math/big"
     "errors"
     "fmt"
+    "github.com/niclabs/tcpaillier"
 )
 
 type BigMatrix struct {
@@ -28,6 +29,7 @@ func NewBigMatrix(rows, cols int, data []*big.Int) BigMatrix {
     return m
 }
 
+// get value of BigMatrix m at (row, col)
 func (m BigMatrix) At(row, col int) *big.Int {
     if row >= m.rows || col >= m.cols || row < 0 || col < 0{
         panic(errors.New(fmt.Sprintf("Index out of bounds: (%d, %d)", row, col)))
@@ -36,6 +38,7 @@ func (m BigMatrix) At(row, col int) *big.Int {
     return m.values[valueIndex]
 }
 
+// set value of BigMatrix m at (row, col)
 func (m BigMatrix) Set(row, col int, value *big.Int) {
     if row >= m.rows || col >= m.cols || row < 0 || col < 0 {
         panic(errors.New(fmt.Sprintf("Index out of bounds: (%d, %d)", row, col)))
@@ -43,6 +46,7 @@ func (m BigMatrix) Set(row, col int, value *big.Int) {
     m.values[m.cols*row + col] = value
 }
 
+// matrix multiplication of unencrypted matrices
 func MatMul(a, b BigMatrix) BigMatrix {
     if a.cols != b.rows {
         panic(errors.New("matrices a and b are not compatible"))
@@ -63,6 +67,7 @@ func MatMul(a, b BigMatrix) BigMatrix {
     return NewBigMatrix(cRows, cCols, values)
 }
 
+// matrix addition of unencrypted matrices
 func MatAdd(a, b BigMatrix) BigMatrix {
     if a.rows != b.rows {
         panic(errors.New("row mismatch in addition"))
@@ -76,6 +81,7 @@ func MatAdd(a, b BigMatrix) BigMatrix {
     return c
 }
 
+// matrix subtraction of unencrypted matrices
 func MatSub(a, b BigMatrix) BigMatrix {
     if a.rows != b.rows {
         panic(errors.New("row mismatch in addition"))
@@ -89,6 +95,7 @@ func MatSub(a, b BigMatrix) BigMatrix {
     return c
 }
 
+// scalar multiplication of matrix for unencryted values
 func MatScaMul(a BigMatrix, b int64) BigMatrix {
     c := NewBigMatrix(a.rows, a.cols, nil)
     bb := big.NewInt(b)
@@ -96,4 +103,44 @@ func MatScaMul(a BigMatrix, b int64) BigMatrix {
         c.values[i].Mul(a.values[i], bb)
     }
     return c
+}
+
+// matrix addition for encrypted matrices
+func MatEncAdd(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
+    if a.rows != b.rows {
+        panic(errors.New("row mismatch in addition"))
+    } else if a.cols != b.cols {
+        panic(errors.New("column mismatch in addition"))
+    }
+    c := NewBigMatrix(a.rows, a.cols, nil)
+    for i := range c.values {
+        val, err := pk.Add(a.values[i], b.values[i])
+        if err != nil {
+            return c, err
+        }
+        c.values[i] = val
+    }
+    return c, nil
+}
+
+// matrix subtraction of encrypted matrices
+func MatEncSub(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
+    if a.rows != b.rows {
+        panic(errors.New("row mismatch in addition"))
+    } else if a.cols != b.cols {
+        panic(errors.New("column mismatch in addition"))
+    }
+    c := NewBigMatrix(a.rows, a.cols, nil)
+    for i := range c.values {
+        negB, _, err := pk.Multiply(b.values[i], big.NewInt(-1))
+        if err != nil {
+            return c, err
+        }
+        val, err := pk.Add(a.values[i], negB)
+        if err != nil {
+            return c, err
+        }
+        c.values[i] = val
+    }
+    return c, nil
 }

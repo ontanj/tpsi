@@ -215,3 +215,103 @@ func TestScalarMultiplication(t *testing.T) {
         }
     }
 }
+
+func TestEncryptedMatrixAddition(t *testing.T) {
+    a := NewBigMatrix(2, 3, sliceToBigInt([]int64{3, 4, 2, 1, 8, 5}))
+    b := NewBigMatrix(2, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6}))
+    c := NewBigMatrix(2, 3, sliceToBigInt([]int64{4, 6, 5, 5, 13, 11}))
+    sks, pk, err := GenerateKeys(512, 1, 4)
+    if err != nil {
+        t.Error(err)
+    }
+    var setting Setting;
+    setting.pk = pk
+    a, err = EncryptMatrix(a, setting)
+    if err != nil {
+        t.Error(err)
+    }
+    b, err = EncryptMatrix(b, setting)
+    if err != nil {
+        t.Error(err)
+    }
+    t.Run("vanilla", func(t *testing.T) {
+        sum, err := MatEncAdd(a, b, setting.pk)
+        if err != nil {
+            t.Error(err)
+        }
+        err = CompareEnc(sum, c, sks, setting)
+        if err != nil {
+            t.Error(err)
+        }
+    })
+    t.Run("column mismatch", func(t *testing.T) {
+        d := NewBigMatrix(2, 2, sliceToBigInt([]int64{1, 2, 3, 4}))
+        d, _ = EncryptMatrix(d, setting)
+        defer func() {
+            if recover() == nil {
+                t.Error("didn't panic")
+            }
+        }()
+        MatEncSub(a, d, setting.pk)
+    })
+    t.Run("column mismatch", func(t *testing.T) {
+        d := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6, 7, 8, 9}))
+        d, _ = EncryptMatrix(d, setting)
+        defer func() {
+            if recover() == nil {
+                t.Error("didn't panic")
+            }
+        }()
+        MatEncSub(a, d, setting.pk)
+    })
+}
+
+func TestEncryptedMatrixSubtraction(t *testing.T) {
+    a := NewBigMatrix(2, 3, sliceToBigInt([]int64{3, 4, 2, 1, 8, 5}))
+    b := NewBigMatrix(2, 3, sliceToBigInt([]int64{1, 2, 2, 0, 4, 3}))
+    c := NewBigMatrix(2, 3, sliceToBigInt([]int64{2, 2, 0, 1, 4, 2}))
+    sks, pk, err := GenerateKeys(512, 1, 4)
+    if err != nil {
+        t.Error(err)
+    }
+    var setting Setting;
+    setting.pk = pk
+    a, err = EncryptMatrix(a, setting)
+    if err != nil {
+        t.Error(err)
+    }
+    b, err = EncryptMatrix(b, setting)
+    if err != nil {
+        t.Error(err)
+    }
+    t.Run("vanilla", func(t *testing.T) {
+        diff, err := MatEncSub(a, b, setting.pk)
+        if err != nil {
+            t.Error(err)
+        }
+        err = CompareEnc(diff, c, sks, setting)
+        if err != nil {
+            t.Error(err)
+        }
+    })
+    t.Run("column mismatch", func(t *testing.T) {
+        d := NewBigMatrix(2, 2, sliceToBigInt([]int64{1, 2, 3, 4}))
+        d, _ = EncryptMatrix(d, setting)
+        defer func() {
+            if recover() == nil {
+                t.Error("didn't panic")
+            }
+        }()
+        MatEncSub(a, d, setting.pk)
+    })
+    t.Run("column mismatch", func(t *testing.T) {
+        d := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6, 7, 8, 9}))
+        d, _ = EncryptMatrix(d, setting)
+        defer func() {
+            if recover() == nil {
+                t.Error("didn't panic")
+            }
+        }()
+        MatEncSub(a, d, setting.pk)
+    })
+}
