@@ -315,3 +315,34 @@ func TestEncryptedMatrixSubtraction(t *testing.T) {
         MatEncSub(a, d, setting.pk)
     })
 }
+
+func TestEncryptedMatrixMultiplication(t *testing.T) {
+    a := NewBigMatrix(2, 3, sliceToBigInt([]int64{1,2,3,4,5,6}))
+    b := NewBigMatrix(3, 2, sliceToBigInt([]int64{1,2,3,4,5,6}))
+    sks, pk, _ := GenerateKeys(512, 1, 4)
+    var setting Setting
+    setting.pk = pk
+    ae, _ := EncryptMatrix(a, setting)
+    t.Run("plaintext from right", func(t *testing.T) {  
+        abe, err := MatEncRightMul(ae, b, setting.pk)
+        if err != nil {
+            t.Error(err)
+        }
+        ab := MatMul(a, b)
+        err = CompareEnc(abe, ab, sks, setting)
+        if err != nil {
+            t.Error(err)
+        }
+    })
+    t.Run("plaintext from left", func(t *testing.T) {  
+        bae, err := MatEncLeftMul(b, ae, setting.pk)
+        if err != nil {
+            t.Error(err)
+        }
+        ba := MatMul(b, a)
+        err = CompareEnc(bae, ba, sks, setting)
+        if err != nil {
+            t.Error(err)
+        }
+    })
+}

@@ -88,6 +88,39 @@ func TestEncryptMatrix(t *testing.T) {
     }
 }
 
+func TestDecryptMatrix(t *testing.T) {
+    var setting Setting
+    sks, pk, err := GenerateKeys(512, 1, 4)
+    setting.pk = pk
+    if err != nil {
+        t.Errorf("%v", err)
+        return
+    }
+    vals := []int64{1,2,3,4,5,6,7,8,9}
+    a := NewBigMatrix(3, 3, sliceToBigInt(vals))
+    enc, _ := EncryptMatrix(a, setting)
+    partial_decrypts := make([]PartialMatrix, len(sks))
+    for i, sk := range sks {
+        pd, err := PartialDecryptMatrix(enc, sk)
+        if err != nil {
+            t.Error(err)
+        }
+        partial_decrypts[i] = pd
+    }
+    decrypted, err := CombineMatrixShares(partial_decrypts, setting)
+    if err != nil {
+        return
+    }
+    for i := 0; i < 3; i += 1 {
+        for j := 0; j < 3; j += 1 {
+            if decrypted.At(i, j).Cmp(a.At(i, j)) != 0 {
+                t.Error("values differ")
+            }
+        }
+    }
+
+}
+
 // checks if encrypted matrix a is equal to unencrypted matrix b, returns error otherwise
 func CompareEnc(a, b BigMatrix, sks []*tcpaillier.KeyShare, setting Setting) error {
     for i := 0; i < a.rows; i += 1 {

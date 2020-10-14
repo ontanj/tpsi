@@ -144,3 +144,65 @@ func MatEncSub(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
     }
     return c, nil
 }
+
+// matrix multiplication encrypted * plain
+func MatEncRightMul(encrypted, plain BigMatrix, pk *tcpaillier.PubKey) (c BigMatrix, err error) {
+    if encrypted.cols != plain.rows {
+        panic(errors.New("matrices a and b are not compatible"))
+    }
+    cRows, cCols := encrypted.rows, plain.cols
+    values := make([]*big.Int, cRows*cCols)
+    r := big.NewInt(0)
+    for i := 0; i < cRows; i += 1 {
+        for j := 0; j < cCols; j += 1 {
+            var sum *big.Int
+            sum, _, err = pk.Multiply(encrypted.At(i, 0), plain.At(0, j))
+                if err != nil {
+                    return
+                }
+            for k := 1; k < encrypted.cols; k += 1 {
+                r, _, err = pk.Multiply(encrypted.At(i, k), plain.At(k, j))
+                if err != nil {
+                    return
+                }
+                sum, err = pk.Add(r, sum)
+                if err != nil {
+                    return
+                }
+            }
+            values[i*cCols+j] = sum
+        }
+    }
+    return NewBigMatrix(cRows, cCols, values), nil
+}
+
+// matrix multiplication plain * encrypted
+func MatEncLeftMul(plain, encrypted BigMatrix, pk *tcpaillier.PubKey) (c BigMatrix, err error) {
+    if plain.cols != encrypted.rows {
+        panic(errors.New("matrices are not compatible"))
+    }
+    cRows, cCols := plain.rows, encrypted.cols
+    values := make([]*big.Int, cRows*cCols)
+    r := big.NewInt(0)
+    for i := 0; i < cRows; i += 1 {
+        for j := 0; j < cCols; j += 1 {
+            var sum *big.Int
+            sum, _, err = pk.Multiply(encrypted.At(0, j), plain.At(i, 0))
+                if err != nil {
+                    return
+                }
+            for k := 1; k < plain.cols; k += 1 {
+                r, _, err = pk.Multiply(encrypted.At(k, j), plain.At(i, k))
+                if err != nil {
+                    return
+                }
+                sum, err = pk.Add(r, sum)
+                if err != nil {
+                    return
+                }
+            }
+            values[i*cCols+j] = sum
+        }
+    }
+    return NewBigMatrix(cRows, cCols, values), nil
+}

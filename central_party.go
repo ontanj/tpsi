@@ -20,3 +20,41 @@ func CPComputeHankelMatrix(items []int64, u *big.Int, setting Setting) BigMatrix
     H := ComputeHankelMatrix(items, u, setting)
     return MatScaMul(H, int64(setting.n-1))
 }
+
+// step 2 of MMult
+func GetMulMatrices(A, B BigMatrix, RAs, RBs []BigMatrix, setting Setting) (RA, MA, MB BigMatrix, err error) {
+    RA = RAs[0]
+    RB := RBs[0]
+    for i := 1; i < setting.n; i += 1 {
+        RA, err = MatEncAdd(RA, RAs[i], setting.pk)
+        if err != nil {
+            return
+        }
+        RB, err = MatEncAdd(RB, RBs[i], setting.pk)
+        if err != nil {
+            return
+        }
+    }
+    MA, err = MatEncAdd(A, RA, setting.pk)
+    if err != nil {
+        return
+    }
+    MB, err = MatEncAdd(B, RB, setting.pk)
+    return
+}
+
+// step 4 of MMult
+func CombineMatrixMultiplication(MAis, MBis []PartialMatrix, ctis []BigMatrix, setting Setting) (AB BigMatrix, err error) {
+    MA, err := CombineMatrixShares(MAis, setting)
+    if err != nil {return}
+    MB, err := CombineMatrixShares(MBis, setting)
+    if err != nil {return}
+    MAMB := MatMul(MA, MB)
+    AB, err = EncryptMatrix(MAMB, setting)
+    if err != nil {return}
+    for _, val := range ctis {
+        AB, err = MatEncAdd(AB, val, setting.pk)
+        if err != nil {return}
+    }
+    return
+} 
