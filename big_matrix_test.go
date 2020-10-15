@@ -209,7 +209,7 @@ func TestEncryptedMatrixAddition(t *testing.T) {
         if err != nil {
             t.Error(err)
         }
-        err = CompareEnc(sum, c, sks, setting)
+        CompareEnc(sum, c, sks, setting, t)
         if err != nil {
             t.Error(err)
         }
@@ -259,7 +259,7 @@ func TestEncryptedMatrixSubtraction(t *testing.T) {
         if err != nil {
             t.Error(err)
         }
-        err = CompareEnc(diff, c, sks, setting)
+        CompareEnc(diff, c, sks, setting, t)
         if err != nil {
             t.Error(err)
         }
@@ -299,7 +299,7 @@ func TestEncryptedMatrixMultiplication(t *testing.T) {
             t.Error(err)
         }
         ab := MatMul(a, b)
-        err = CompareEnc(abe, ab, sks, setting)
+        CompareEnc(abe, ab, sks, setting, t)
         if err != nil {
             t.Error(err)
         }
@@ -310,7 +310,7 @@ func TestEncryptedMatrixMultiplication(t *testing.T) {
             t.Error(err)
         }
         ba := MatMul(b, a)
-        err = CompareEnc(bae, ba, sks, setting)
+        CompareEnc(bae, ba, sks, setting, t)
         if err != nil {
             t.Error(err)
         }
