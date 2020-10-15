@@ -3,6 +3,7 @@ package tpsi
 import (
     "github.com/niclabs/tcpaillier"
     "math/big"
+    "math"
 )
 
 type Setting struct {
@@ -183,4 +184,16 @@ func GetCti(MA, MB, RA, RAi, RBi BigMatrix, setting Setting, secret_key *tcpaill
     MA_part, err = PartialDecryptMatrix(MA, secret_key)
     MB_part, err = PartialDecryptMatrix(MB, secret_key)
     return
+}
+
+// calculates how many instances of MMult is needed to get all H,
+// according to: n = floor( log(k) )
+// H^2^n being the highest order needed
+func NbrMMultInstances(setting Setting) int {
+    return int(math.Floor(math.Log(float64(setting.T+1))))
+}
+
+// step 3f of CTest-diff
+func SampleHMasks(setting Setting) {
+    SampleMatrix(1, 2*(setting.T+1), setting.q)
 }

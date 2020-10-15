@@ -21,6 +21,11 @@ func CPComputeHankelMatrix(items []int64, u *big.Int, setting Setting) BigMatrix
     return MatScaMul(H, int64(setting.n-1))
 }
 
+//step 3b of CTest-diff
+func SampleVVector(setting Setting) (v BigMatrix, err error) {
+    return SampleMatrix(setting.T+1, 1, setting.q)
+}
+
 // step 2 of MMult
 func GetMulMatrices(A, B BigMatrix, RAs, RBs []BigMatrix, setting Setting) (RA, MA, MB BigMatrix, err error) {
     RA = RAs[0]
@@ -58,3 +63,26 @@ func CombineMatrixMultiplication(MAis, MBis []PartialMatrix, ctis []BigMatrix, s
     }
     return
 } 
+
+// sample u from step 3e of CTest-diff
+func SampleUVector(setting Setting) (u BigMatrix, err error) {
+    return SampleMatrix(1, setting.T+1, setting.q)
+}
+
+// step 3e of CTest-diff
+func HSeq(Hvs BigMatrix, setting Setting) (h_seq BigMatrix, err error) {
+    u, err := SampleUVector(setting)
+    if err != nil {return}
+    Hvs = CropMatrix(Hvs, 2*(setting.T+1))
+    return MatEncLeftMul(u, Hvs, setting.pk)
+}
+
+// step 3g of CTest-diff
+func MaskH(Hs BigMatrix, HMasks []BigMatrix, setting Setting) (diff BigMatrix, err error) {
+    sum := HMasks[0]
+    for i := 1; i < len(HMasks); i += 1 {
+        sum, err = MatEncAdd(sum, HMasks[i], setting.pk)
+        if err != nil {return}
+    }
+    return MatEncSub(Hs, sum, setting.pk)
+}

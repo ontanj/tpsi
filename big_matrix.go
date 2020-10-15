@@ -206,3 +206,26 @@ func MatEncLeftMul(plain, encrypted BigMatrix, pk *tcpaillier.PubKey) (c BigMatr
     }
     return NewBigMatrix(cRows, cCols, values), nil
 }
+
+// concatenate matrices as A|B
+func ConcatenateMatrices(a, b BigMatrix) BigMatrix {
+    if a.rows != b.rows {
+        panic("matrices not compatible for concatenation")
+    }
+    vals := make([]*big.Int, 0, (a.cols + b.cols) * a.rows)
+    for i := 0; i < a.rows; i += 1 {
+        vals = append(vals, a.values[i*a.cols:(i+1)*a.cols]...)
+        vals = append(vals, b.values[i*b.cols:(i+1)*b.cols]...)
+    }
+    return NewBigMatrix(a.rows, a.cols + b.cols, vals)
+}
+
+// create a new matrix from last k columns of a
+func CropMatrix(a BigMatrix, k int) BigMatrix {
+    vals := make([]*big.Int, 0, k*a.rows)
+    d := a.cols - k
+    for i := 0; i < a.rows; i += 1 {
+        vals = append(vals, a.values[i*a.cols+d:(i+1)*a.cols]...)
+    }
+    return NewBigMatrix(a.rows, k, vals)
+}

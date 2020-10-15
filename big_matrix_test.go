@@ -92,13 +92,7 @@ func TestSet(t *testing.T) {
     a := NewBigMatrix(2, 2, sliceToBigInt([]int64{1,2,3,4}))
     b := NewBigMatrix(2, 2, sliceToBigInt([]int64{1,2,5,4}))
     a.Set(1,0,big.NewInt(5))
-    for i := 0; i < 2; i++ {
-        for j:= 0; j < 2; j++ {
-            if a.At(i,j).Cmp(b.At(i,j)) != 0 {
-                t.Error("Value error in set")
-            }
-        }
-    }
+    ComparePlain(2, 2, a, b, t)
     t.Run("index out of bounds", func (t *testing.T) {
         defer func() {
             if recover() == nil {
@@ -115,13 +109,7 @@ func TestMultiplication(t *testing.T) {
     t.Run("vanilla", func(t *testing.T) {
         c := MatMul(a, b)
         d := NewBigMatrix(2, 3, sliceToBigInt([]int64{9,12,15,19,26,33}))
-        for i := 0; i < 2; i += 1 {
-            for j := 0; j < 3; j += 1 {
-                if c.At(i,j).Cmp(d.At(i,j)) != 0 {
-                    t.Error("error in matrix multiplication")
-                }
-            }
-        }
+        ComparePlain(2, 3, c, d, t)
     })
     t.Run("dimension mismatch", func(t *testing.T) {
         defer func() {
@@ -138,13 +126,7 @@ func TestAddition(t *testing.T) {
     b := MatAdd(a, a)
     c := NewBigMatrix(2, 2, sliceToBigInt([]int64{2,4,6,8}))
     t.Run("vanilla addition", func(t *testing.T) {
-        for i := 0; i < 2; i += 1 {
-            for j := 0; j < 2; j += 1 {
-                if b.At(i,j).Cmp(c.At(i,j)) != 0 {
-                    t.Error("error in matrix addition")
-                }
-            }
-        }
+        ComparePlain(2, 2, b, c, t)
     })
     
     t.Run("row mismatch", func(t *testing.T) {
@@ -173,13 +155,7 @@ func TestSubtraction(t *testing.T) {
     c := MatSub(a, b)
     d := NewBigMatrix(2, 2, sliceToBigInt([]int64{4,1,4,5}))
     t.Run("vanilla subtraction", func(t *testing.T) {
-        for i := 0; i < 2; i += 1 {
-            for j := 0; j < 2; j += 1 {
-                if c.At(i,j).Cmp(d.At(i,j)) != 0 {
-                    t.Error("data error")
-                }
-            }
-        }
+        ComparePlain(2, 2, c, d, t)
     })
 
     t.Run("row mismatch", func(t *testing.T) {
@@ -207,13 +183,7 @@ func TestScalarMultiplication(t *testing.T) {
     b := int64(2)
     c := NewBigMatrix(2, 3, sliceToBigInt([]int64{6, 8, 4, 2, 16, 10}))
     d := MatScaMul(a, b)
-    for i := 0; i < 2; i++ {
-        for j := 0; j < 3; j++ {
-            if d.At(i, j).Cmp(c.At(i, j)) != 0 {
-                t.Error("error in scalar multiplication")
-            }
-        }
-    }
+    ComparePlain(2, 3, c, d, t)
 }
 
 func TestEncryptedMatrixAddition(t *testing.T) {
@@ -345,4 +315,29 @@ func TestEncryptedMatrixMultiplication(t *testing.T) {
             t.Error(err)
         }
     })
+}
+
+func ComparePlain(rows, cols int, a, b BigMatrix, t *testing.T) {
+    for i := 0; i < rows; i += 1 {
+        for j := 0; j < cols; j += 1 {
+            if a.At(i, j).Cmp(b.At(i, j)) != 0 {
+                t.Errorf("values differ at (%d, %d)", i, j)
+            }
+        }
+    }
+}
+
+func TestConcatenation(t *testing.T) {
+    a := NewBigMatrix(3, 2, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6}))
+    b := NewBigMatrix(3, 2, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6}))
+    c := NewBigMatrix(3, 4, sliceToBigInt([]int64{1, 2, 1, 2, 3, 4, 3, 4, 5, 6, 5, 6}))
+    ab := ConcatenateMatrices(a, b)
+    ComparePlain(3, 4, c, ab, t)
+}
+
+func TestCropMatrix(t *testing.T) {
+    a := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6, 7, 8, 9}))
+    a = CropMatrix(a, 2)   
+    b := NewBigMatrix(3, 2, sliceToBigInt([]int64{2, 3, 5, 6, 8, 9}))
+    ComparePlain(3, 2, a, b, t)
 }
