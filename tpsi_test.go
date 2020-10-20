@@ -189,3 +189,92 @@ func TestMMult(t *testing.T) {
     AB, err := CombineMatrixMultiplication(MA_parts, MB_parts, cts, setting)
     CompareEnc(AB, AB_corr, sks, setting, t)
 }
+
+func TestMPC(t *testing.T) {
+    // setup
+    a_plain := big.NewInt(13)
+    var setting Setting
+    setting.n = 4
+    q, err := SamplePrime()
+    if err != nil {
+        t.Error(err)
+    }
+    setting.q = q
+    sks, pk, err := GenerateKeys(512, 1, setting.n)
+    if err != nil {
+        t.Error(err)
+        return
+    }
+    setting.pk = pk
+    a, _ := EncryptValue(a_plain, setting)
+
+    // step 1: sample d
+    d_plain := make([]*big.Int, setting.n)
+    d_enc := make([]*big.Int, setting.n)
+    for i := range d_plain {
+        plain, enc, err := GetRandomEncrypted(setting)
+        if err != nil {t.Error(err)}
+        d_plain[i] = plain
+        d_enc[i] = enc
+    }
+
+    // step 5: mask and decrypt
+    e_parts := make([]*tcpaillier.DecryptionShare, setting.n)
+    for i := range d_enc {
+        e_partial, err := SumMasksDecrypt(a, d_enc, sks[i], setting)
+        if err != nil {t.Error(err)}
+        e_parts[i] = e_partial
+    }
+    e, err := CombineShares(e_parts, setting)
+    if err != nil {
+        t.Error(err)
+    }
+
+    // step 7: assign shares
+    as := make([]*big.Int, setting.n)
+    as[0] = SecretShare(d_plain[0], e, setting)
+    for i := 1; i < setting.n; i += 1 {
+        as[i] = NegateValue(d_plain[i], setting)
+    }
+
+    t.Run("test ASS", func (t *testing.T) {
+        for _, val := range as {
+            a_plain.Sub(a_plain, val)
+        }
+        a_plain.Mod(a_plain, setting.q)
+        if a_plain.Cmp(big.NewInt(0)) != 0 {
+            t.Error("shares don't add up")
+        }
+    })
+
+    t.Run("test Mult", func (t *testing.T) {
+        b, err := EncryptValue(big.NewInt(7), setting)
+        if err != nil {t.Error(err)}
+
+        // step 2: partial multiplication
+        partial_prods := make([]*big.Int, setting.n)        
+        for i, val := range as {
+            prod, err := MultiplyEncrypted(b, val, setting)
+            if err != nil {t.Error(err)}
+            partial_prods[i] = prod
+        }
+
+        // step 6: sum partials
+        sum, err := SumMultiplication(partial_prods, setting)
+        if err != nil {t.Error(err)}
+        
+        // verify
+        parts := make([]*tcpaillier.DecryptionShare, setting.n)
+        for i, sk := range sks {
+            part, err := PartialDecryptValue(sum, sk)
+            if err != nil {t.Error(err)}
+            parts[i] = part
+        }
+        ab, err := CombineShares(parts, setting)
+        ab.Mod(ab, setting.q)
+        if err != nil {t.Error(err)}
+        if ab.Cmp(big.NewInt(91)) != 0 {
+            t.Error("multiplication error")
+        }
+    })
+}

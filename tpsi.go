@@ -197,3 +197,44 @@ func NbrMMultInstances(setting Setting) int {
 func SampleHMasks(setting Setting) {
     SampleMatrix(1, 2*(setting.T+1), setting.q)
 }
+
+//Additive Secret Sharing
+
+//ASS, step 1
+func GetRandomEncrypted(setting Setting) (plain, cipher *big.Int, err error) {
+    plain, err = SampleIntFromField(setting.q)
+    if err != nil {return}
+    cipher, err = EncryptValue(plain, setting)
+    return
+}
+
+//ASS, step 5 & 6
+func SumMasksDecrypt(a *big.Int, ds []*big.Int, sk *tcpaillier.KeyShare, setting Setting) (e_partial *tcpaillier.DecryptionShare, err error) {
+    for _, val := range ds {
+        a, err = setting.pk.Add(a, val)
+        if err != nil {return}
+    }
+    return PartialDecryptValue(a, sk)
+}
+
+//ASS, step 7
+func NegateValue(d *big.Int, setting Setting) *big.Int {
+    neg := new(big.Int)
+    neg.Neg(d)
+    neg.Mod(neg, setting.q)
+    return neg
+}
+
+//Multiplication
+
+//Mult, step 2
+func MultiplyEncrypted(encrypted, plain *big.Int, setting Setting) (*big.Int, error) {
+    prod, _, err := setting.pk.Multiply(encrypted, plain)
+    return prod, err
+}
+
+//Mult, step 6
+func SumMultiplication(values []*big.Int, setting Setting) (sum *big.Int, err error) {
+    sum, err = setting.pk.Add(values...)
+    return
+}
