@@ -76,3 +76,75 @@ func TestMultWorkers(t *testing.T) {
         }
     }
 }
+
+func TestZeroTestWorkers(t *testing.T) {
+    var setting Setting
+    setting.n = 4
+    sks, pk, err := GenerateKeys(512, 1, setting.n)
+    if err != nil {panic(err)}
+    setting.pk = pk
+    setting.q, err = SamplePrime()
+    mask_channel := make(chan *big.Int)
+    masks_channel := make(chan []*big.Int)
+    dec_channel := make(chan *tcpaillier.DecryptionShare)
+    shares_channel := make(chan []*tcpaillier.DecryptionShare)
+    return_channel := make(chan bool)
+
+    t.Run("test 0", func (t *testing.T) {
+        cipher, err := EncryptValue(big.NewInt(0), setting)
+        if err != nil {panic(err)}
+
+        go CentralZeroTestWorker(cipher, sks[0], setting, mask_channel, masks_channel, dec_channel, shares_channel, return_channel)
+        for i := 1; i < setting.n; i += 1 {
+            go ZeroTestWorker(cipher, sks[i], setting, mask_channel, masks_channel, dec_channel, shares_channel, return_channel)
+        }
+
+        for i := 0; i < setting.n; i += 1 {
+            if !(<-return_channel) {
+                t.Error("zero test fail for 0")
+            }
+        }
+    })
+
+    t.Run("test non-0", func (t *testing.T) {
+        cipher, err := EncryptValue(big.NewInt(131), setting)
+        if err != nil {panic(err)}
+
+        go CentralZeroTestWorker(cipher, sks[0], setting, mask_channel, masks_channel, dec_channel, shares_channel, return_channel)
+        for i := 1; i < setting.n; i += 1 {
+            go ZeroTestWorker(cipher, sks[i], setting, mask_channel, masks_channel, dec_channel, shares_channel, return_channel)
+        }
+
+        for i := 0; i < setting.n; i += 1 {
+            if (<-return_channel) {
+                t.Error("zero test true for 131")
+            }
+        }
+    })
+}
+
+func TestDecryptionWorkers(t *testing.T) {
+    var setting Setting
+    setting.n = 4
+    sks, pk, err := GenerateKeys(512, 1, setting.n)
+    if err != nil {panic(err)}
+    setting.pk = pk
+    setting.q, err = SamplePrime()
+    dec_channel := make(chan *tcpaillier.DecryptionShare)
+    shares_channel := make(chan []*tcpaillier.DecryptionShare)
+    return_channel := make(chan *big.Int)
+
+    cipher, err := EncryptValue(big.NewInt(83), setting)
+    if err != nil {panic(err)}
+
+    go CentralDecryptionWorker(cipher, sks[0], setting, dec_channel, shares_channel, return_channel)
+    for i := 1; i < setting.n; i += 1 {
+        go DecryptionWorker(cipher, sks[i], setting, dec_channel, shares_channel, return_channel)
+    }
+
+    for i := 0; i < setting.n; i += 1 {
+        if (<-return_channel).Cmp(big.NewInt(83)) != 0 {
+            t.Error("decryption error")
+        }
+    }
+}
