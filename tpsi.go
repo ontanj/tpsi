@@ -10,7 +10,6 @@ type Setting struct {
     pk *tcpaillier.PubKey
     n int // number of participants
     m int // set size
-    q *big.Int // field size
     T int // threshold
 }
 
@@ -28,7 +27,7 @@ func sumSlice(sl []*big.Int, q *big.Int) *big.Int {
     return sum.Mod(sum, q);
 }
 
-// element-wise addition of big.Int-slice
+// element-wise multiplication of big.Int-slice
 func elMulSlice(sl1, sl2 []*big.Int, q *big.Int) []*big.Int {
     slProd := make([]*big.Int, len(sl1))
     for i := range slProd {
@@ -39,14 +38,14 @@ func elMulSlice(sl1, sl2 []*big.Int, q *big.Int) []*big.Int {
 }
 
 // compute the Hankel Matrix for items and (random) u.
-func ComputeHankelMatrix(items []int64, u *big.Int, setting Setting) BigMatrix {
+func ComputeHankelMatrix(items []int64, u, q *big.Int, setting Setting) BigMatrix {
     u_list := make([]*big.Int, setting.m) // stores u^a^i for each a
     u1_list := make([]*big.Int, setting.m) // stores u^a for each a
     H := NewBigMatrix(setting.T + 1, setting.T + 1, nil)
     H.Set(0, 0, big.NewInt(int64(setting.m)))
     for i := range u1_list {
         u1_list[i] = big.NewInt(0)
-        u1_list[i].Exp(u, big.NewInt(items[i]), setting.q);
+        u1_list[i].Exp(u, big.NewInt(items[i]), q);
     }
     copy(u_list, u1_list)
     for i := 1; ; i += 1 { // each unique element in Hankel matrix
@@ -59,14 +58,14 @@ func ComputeHankelMatrix(items []int64, u *big.Int, setting Setting) BigMatrix {
             startCol = i - setting.T
             stopCol = 3
         }
-        el := sumSlice(u_list, setting.q)
+        el := sumSlice(u_list, q)
         for j := startCol; j < stopCol; j += 1 { // each matrix entry with current element
             H.Set(i-j, j, el)
         }
         if i >= 2 * setting.T {
             break
         }
-        u_list = elMulSlice(u_list, u1_list, setting.q)
+        u_list = elMulSlice(u_list, u1_list, q)
     }
     return H
 }
@@ -140,7 +139,7 @@ func SampleMatrix(rows, cols int, q *big.Int) (a BigMatrix, err error) {
     vals := make([]*big.Int, rows*cols)
     var r *big.Int
     for i := range vals {
-        r, err = SampleIntFromField(q)
+        r, err = SampleInt(q)
         if err != nil {
             return
         }
@@ -152,11 +151,11 @@ func SampleMatrix(rows, cols int, q *big.Int) (a BigMatrix, err error) {
 
 //step 1 of MMult
 func SampleRMatrices(setting Setting) (RAi_plain, RAi_enc, RBi_plain, RBi_enc BigMatrix, err error) {
-    RAi_plain, err = SampleMatrix(setting.T+1, setting.T+1, setting.q)
+    RAi_plain, err = SampleMatrix(setting.T+1, setting.T+1, setting.pk.N)
     if err != nil {return}
     RAi_enc, err = EncryptMatrix(RAi_plain, setting)
     if err != nil {return}
-    RBi_plain, err = SampleMatrix(setting.T+1, setting.T+1, setting.q)
+    RBi_plain, err = SampleMatrix(setting.T+1, setting.T+1, setting.pk.N)
     if err != nil {return}
     RBi_enc, err = EncryptMatrix(RBi_plain, setting)
     if err != nil {return}
@@ -196,14 +195,14 @@ func NbrMMultInstances(setting Setting) int {
 
 // step 3f of CTest-diff
 func SampleHMasks(setting Setting) {
-    SampleMatrix(1, 2*(setting.T+1), setting.q)
+    SampleMatrix(1, 2*(setting.T+1), setting.pk.N)
 }
 
 //Additive Secret Sharing
 
 //ASS, step 1
 func GetRandomEncrypted(setting Setting) (plain, cipher *big.Int, err error) {
-    plain, err = SampleIntFromField(setting.q)
+    plain, err = SampleInt(setting.pk.N)
     if err != nil {return}
     cipher, err = EncryptValue(plain, setting)
     return
@@ -222,7 +221,7 @@ func SumMasksDecrypt(a *big.Int, ds []*big.Int, sk *tcpaillier.KeyShare, setting
 func NegateValue(d *big.Int, setting Setting) *big.Int {
     neg := new(big.Int)
     neg.Neg(d)
-    neg.Mod(neg, setting.q)
+    neg.Mod(neg, setting.pk.N)
     return neg
 }
 

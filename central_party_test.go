@@ -11,9 +11,12 @@ func TestCPHankelMatrix(t *testing.T) {
     setting.m = 3
     setting.T = 2
     setting.n = 4
-    setting.q = big.NewInt(11)
+    _, pk, err := GenerateKeys(512, 1, setting.n)
+    if err != nil {t.Error(err)}
+    setting.pk = pk
+    q := big.NewInt(11)
     u := big.NewInt(6)
-    H := CPComputeHankelMatrix(items, u, setting)
+    H := CPComputeHankelMatrix(items, u, q, setting)
     H_corr := NewBigMatrix(3, 3, sliceToBigInt([]int64{9,27,12,27,12,18,12,18,24}))
     t.Run("check dimensions", func(t *testing.T){
         if H.rows != setting.T + 1 || H.cols != setting.T + 1 {

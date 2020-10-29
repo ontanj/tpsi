@@ -11,9 +11,13 @@ func TestHankelMatrix(t *testing.T) {
     items := []int64{2, 3, 5}
     setting.m = 3
     setting.T = 2
-    setting.q = big.NewInt(11)
+    setting.n = 4
+    _, pk, err := GenerateKeys(512, 1, setting.n)
+    if err != nil {t.Error(err)}
+    setting.pk = pk
+    q := big.NewInt(11)
     u := big.NewInt(6)
-    H := ComputeHankelMatrix(items, u, setting)
+    H := ComputeHankelMatrix(items, u, q, setting)
     H_corr := NewBigMatrix(3, 3, sliceToBigInt([]int64{3,9,4,9,4,6,4,6,8}))
     t.Run("check dimensions", func(t *testing.T){
         if H.rows != setting.T + 1 || H.cols != setting.T + 1 {
@@ -148,8 +152,6 @@ func TestMMult(t *testing.T) {
     setting.T = 2
     sks, pk, _ := GenerateKeys(512, 1, setting.n)
     setting.pk = pk
-    q, err := SamplePrime()
-    setting.q = q
     A, _ = EncryptMatrix(A, setting)
     B, _ = EncryptMatrix(B, setting)
 
@@ -193,11 +195,6 @@ func TestMPC(t *testing.T) {
     a_plain := big.NewInt(13)
     var setting Setting
     setting.n = 4
-    q, err := SamplePrime()
-    if err != nil {
-        t.Error(err)
-    }
-    setting.q = q
     sks, pk, err := GenerateKeys(512, 1, setting.n)
     if err != nil {
         t.Error(err)
@@ -239,7 +236,7 @@ func TestMPC(t *testing.T) {
         for _, val := range as {
             a_plain.Sub(a_plain, val)
         }
-        a_plain.Mod(a_plain, setting.q)
+        a_plain.Mod(a_plain, setting.pk.N)
         if a_plain.Cmp(big.NewInt(0)) != 0 {
             t.Error("shares don't add up")
         }
@@ -269,7 +266,7 @@ func TestMPC(t *testing.T) {
             parts[i] = part
         }
         ab, err := CombineShares(parts, setting)
-        ab.Mod(ab, setting.q)
+        ab.Mod(ab, setting.pk.N)
         if err != nil {t.Error(err)}
         if ab.Cmp(big.NewInt(91)) != 0 {
             t.Error("multiplication error")

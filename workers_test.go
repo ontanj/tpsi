@@ -12,8 +12,6 @@ func TestASSWorkers(t *testing.T) {
     sks, pk, err := GenerateKeys(512, 1, 4)
     if err != nil {t.Error(err)}
     setting.pk = pk
-    setting.q, err = SamplePrime()
-    if err != nil {t.Error(err)}
     mask_channel := make(chan *big.Int)
     masks_channel := make(chan []*big.Int)
     dec_channel := make(chan *tcpaillier.DecryptionShare)
@@ -30,7 +28,7 @@ func TestASSWorkers(t *testing.T) {
     for i := 0; i < setting.n; i += 1 {
         val := <-return_channel
         sum.Add(sum, val)
-        sum.Mod(sum, setting.q)
+        sum.Mod(sum, setting.pk.N)
     }
     if sum.Cmp(big.NewInt(20)) != 0 {
         t.Error("shares don't add up")
@@ -43,8 +41,7 @@ func TestMultWorkers(t *testing.T) {
     sks, pk, err := GenerateKeys(512, 1, 4)
     if err != nil {t.Error(err)}
     setting.pk = pk
-    setting.q, err = SamplePrime()
-    if err != nil {t.Error(err)}
+    
     mask_channel := make(chan *big.Int)
     masks_channel := make(chan []*big.Int)
     dec_channel := make(chan *tcpaillier.DecryptionShare)
@@ -69,7 +66,7 @@ func TestMultWorkers(t *testing.T) {
             parts[i] = part
         }
         prod, err := CombineShares(parts, setting)
-        prod.Mod(prod, setting.q)
+        prod.Mod(prod, setting.pk.N)
         if err != nil {t.Error(err)}
         if prod.Cmp(big.NewInt(12)) != 0 {
             t.Error("multiplication error")
@@ -83,7 +80,7 @@ func TestZeroTestWorkers(t *testing.T) {
     sks, pk, err := GenerateKeys(512, 1, setting.n)
     if err != nil {panic(err)}
     setting.pk = pk
-    setting.q, err = SamplePrime()
+
     mask_channel := make(chan *big.Int)
     masks_channel := make(chan []*big.Int)
     dec_channel := make(chan *tcpaillier.DecryptionShare)
@@ -129,7 +126,7 @@ func TestDecryptionWorkers(t *testing.T) {
     sks, pk, err := GenerateKeys(512, 1, setting.n)
     if err != nil {panic(err)}
     setting.pk = pk
-    setting.q, err = SamplePrime()
+    
     dec_channel := make(chan *tcpaillier.DecryptionShare)
     shares_channel := make(chan []*tcpaillier.DecryptionShare)
     return_channel := make(chan *big.Int)

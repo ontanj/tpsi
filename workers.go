@@ -161,7 +161,7 @@ func CentralZeroTestWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting,
                            return_channel chan<- bool) {
     var err error
     masks := make([]*big.Int, setting.n)
-    mask, err := SampleIntFromField(setting.q)
+    mask, err := SampleInt(setting.pk.N)
     if err != nil {panic(err)}
     mask, err = EncryptValue(mask, setting)
     if err != nil {panic(err)}
@@ -199,7 +199,7 @@ func ZeroTestWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting,
                     shares_channel <-chan []*tcpaillier.DecryptionShare,
                     return_channel chan<- bool) {
 
-    mask, err := SampleIntFromField(setting.q)
+    mask, err := SampleInt(setting.pk.N)
     if err != nil {panic(err)}
 
     mask, err = EncryptValue(mask, setting)
@@ -246,7 +246,7 @@ func CentralDecryptionWorker(cipher *big.Int, sk *tcpaillier.KeyShare, setting S
     plain, err := CombineShares(ds, setting)
     if err != nil {panic(err)}
 
-    return_channel <- plain.Mod(plain, setting.q)
+    return_channel <- plain.Mod(plain, setting.pk.N)
 }
 
 func DecryptionWorker(cipher *big.Int, sk *tcpaillier.KeyShare, setting Setting,
@@ -263,5 +263,5 @@ func DecryptionWorker(cipher *big.Int, sk *tcpaillier.KeyShare, setting Setting,
     plain, err := CombineShares(ds, setting)
     if err != nil {panic(err)}
 
-    return_channel <- plain.Mod(plain, setting.q)
+    return_channel <- plain.Mod(plain, setting.pk.N)
 }
