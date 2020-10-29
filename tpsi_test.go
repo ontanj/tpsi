@@ -159,13 +159,11 @@ func TestMMult(t *testing.T) {
     RAs_crypt := make([]BigMatrix, setting.n)
     RBs_crypt := make([]BigMatrix, setting.n)
     for i := 0; i < setting.n; i += 1 {
-        RAi, RBi, err := SampleRMatrices(setting)
+        RAi_clear, RAi_crypt, RBi_clear, RBi_crypt, err := SampleRMatrices(setting)
         if err != nil {t.Error(err)}
-        RAs_clear[i] = RAi
-        RBs_clear[i] = RBi
-        RAi_crypt, _ := EncryptMatrix(RAi, setting)
+        RAs_clear[i] = RAi_clear
         RAs_crypt[i] = RAi_crypt
-        RBi_crypt, _ := EncryptMatrix(RBi, setting)
+        RBs_clear[i] = RBi_clear
         RBs_crypt[i] = RBi_crypt
     }
 

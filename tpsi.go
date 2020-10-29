@@ -151,15 +151,15 @@ func SampleMatrix(rows, cols int, q *big.Int) (a BigMatrix, err error) {
 }
 
 //step 1 of MMult
-func SampleRMatrices(setting Setting) (RAi, RBi BigMatrix, err error) {
-    RAi, err = SampleMatrix(setting.T+1, setting.T+1, setting.q)
-    if err != nil {
-        return
-    }
-    RBi, err = SampleMatrix(setting.T+1, setting.T+1, setting.q)    
-    if err != nil {
-        return
-    }
+func SampleRMatrices(setting Setting) (RAi_plain, RAi_enc, RBi_plain, RBi_enc BigMatrix, err error) {
+    RAi_plain, err = SampleMatrix(setting.T+1, setting.T+1, setting.q)
+    if err != nil {return}
+    RAi_enc, err = EncryptMatrix(RAi_plain, setting)
+    if err != nil {return}
+    RBi_plain, err = SampleMatrix(setting.T+1, setting.T+1, setting.q)
+    if err != nil {return}
+    RBi_enc, err = EncryptMatrix(RBi_plain, setting)
+    if err != nil {return}
     return
 }
 
