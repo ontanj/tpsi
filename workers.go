@@ -265,3 +265,142 @@ func DecryptionWorker(cipher *big.Int, sk *tcpaillier.KeyShare, setting Setting,
 
     return_channel <- plain.Mod(plain, setting.pk.N)
 }
+
+// returns 4 slices through return_channel:
+//  * q numerator
+//  * q denominator
+//  * r numerator
+//  * r denominator (slice of size 1 as all coefficents share denominator)
+func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaillier.KeyShare, setting Setting, central bool,
+                                mask_channel chan *big.Int,
+                                masks_channel chan []*big.Int,
+                                dec_channel chan *tcpaillier.DecryptionShare,
+                                shares_channel chan []*tcpaillier.DecryptionShare,
+                                mult_channel chan *big.Int,
+                                sub_channel chan BigMatrix,
+                                return_channel chan BigMatrix) {
+    
+    zt_channel := make(chan bool)
+    var la int // degree of dividend
+    for la = a.cols-1; la >= 0; la -= 1 { // find degree of divisor
+        if central {
+            go CentralZeroTestWorker(a.At(0,la), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
+        } else {
+            go ZeroTestWorker(a.At(0,la), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
+        }
+        if !(<-zt_channel) {
+            break
+        }
+    }
+    var lb int // degree of divisor
+    for lb = b.cols-1; lb >= 0; lb -= 1 { // find degree of divisor
+        if central {
+            go CentralZeroTestWorker(b.At(0,lb), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
+        } else {
+            go ZeroTestWorker(b.At(0,lb), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
+        }
+        if !(<-zt_channel) {
+            break
+        }
+    }
+    a_num := a
+    q_num := make([]*big.Int, 1+la-lb)
+    q_den := make([]*big.Int, 1+la-lb)
+    mul_channel := make(chan *big.Int)
+
+    for i := la; i >= lb; i -= 1 { // start at highest degree coefficient, go until dividend smaller than divisor
+        if central { // skip 0 coefficents
+            go CentralZeroTestWorker(a_num.At(0, i), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
+        } else {
+            go ZeroTestWorker(a_num.At(0, i), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
+        }
+        if <-zt_channel {
+            continue
+        }
+
+        pos := i-lb // entry in q at pos
+
+        // q numerator: b_den * a_num
+        if central {
+            go CentralMultWorker(a_num.At(0, i), b_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+        } else {
+            go MultWorker(a_num.At(0, i), b_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+        }
+        num := <-mul_channel
+        q_num[pos] = num
+
+        // q denominator: b_num * a_den
+        if central {
+            go CentralMultWorker(b.At(0, lb), a_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+        } else {
+            go MultWorker(b.At(0, lb), a_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+        }
+        den := <-mul_channel
+        q_den[pos] = den
+
+        // p = q_val * b
+        p_num := NewBigMatrix(1, lb, nil) // partial result, size is degree of (partial) dividend - 1 = i , skip highest coefficient as it is cancelling
+        for j := 0; j < lb; j += 1 {
+            if central {
+                go CentralMultWorker(num, b.At(0, j), sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+            } else {
+                go MultWorker(num, b.At(0, j), sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+            }
+            val := <-mul_channel
+            p_num.Set(0, j, val)
+        }
+        p_den := den
+
+        // make common denominator for p and a
+        r_num := NewBigMatrix(1, i, nil)
+        for i := 0; i < r_num.cols; i += 1 {
+            if central {
+                go CentralMultWorker(a_num.At(0, i), p_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+            } else {
+                go MultWorker(a_num.At(0, i), p_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+            }
+            val := <-mul_channel
+            r_num.Set(0, i, val)
+        }
+        for i := 0; i < p_num.cols; i += 1 {
+            if central {
+                go CentralMultWorker(p_num.At(0, i), a_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+            } else {
+                go MultWorker(p_num.At(0, i), a_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+            }
+            val := <-mul_channel
+            p_num.Set(0, i, val)
+        }
+        ret := make(chan *big.Int)
+        if central {
+            go CentralMultWorker(a_den, p_den, sk, setting, mask_channel, masks_channel, dec_channel, ret)
+        } else {
+            go MultWorker(a_den, p_den, sk, setting, mask_channel, masks_channel, dec_channel, ret)
+        }
+        r_den := <-ret
+
+        // subtract r2 = r1 - p
+        r_num = divSub(r_num, p_num, setting)
+
+        a_num = r_num
+        a_den = r_den
+
+    }
+
+    return_channel <- NewBigMatrix(1, len(q_num), q_num)
+    return_channel <- NewBigMatrix(1, len(q_den), q_den)
+    return_channel <- a_num
+    return_channel <- NewBigMatrix(1, 1, []*big.Int{a_den})
+}
+
+func divSub(r, p BigMatrix, setting Setting) BigMatrix {
+    pos_diff := r.cols-p.cols
+    for i := 0; i < p.cols; i += 1 {
+        neg, err := setting.pk.MultiplyFixed(p.At(0,i), big.NewInt(-1), big.NewInt(1))
+        if err != nil {panic(err)}
+        diff, err := setting.pk.Add(r.At(0, i+pos_diff), neg)
+        if err != nil {panic(err)}
+        r.Set(0, i+pos_diff, diff)
+    }
+    return r
+}
