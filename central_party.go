@@ -17,8 +17,10 @@ func CPComputeHankelMatrix(items []int64, u, q *big.Int, setting Setting) BigMat
 }
 
 //step 3b of CTest-diff
-func SampleVVector(setting Setting) (v BigMatrix, err error) {
-    return SampleMatrix(setting.T+1, 1, setting.pk.N)
+func SampleVVector(m BigMatrix, setting Setting) (v BigMatrix, err error) {
+    v_plain, err := SampleMatrix(m.cols, 1, setting.pk.N)
+    if err != nil {return}
+    return EncryptMatrix(v_plain, setting)
 }
 
 // step 2 of MMult
@@ -60,15 +62,15 @@ func CombineMatrixMultiplication(MAis, MBis []PartialMatrix, ctis []BigMatrix, s
 } 
 
 // sample u from step 3e of CTest-diff
-func SampleUVector(setting Setting) (u BigMatrix, err error) {
-    return SampleMatrix(1, setting.T+1, setting.pk.N)
+func SampleUVector(m BigMatrix, setting Setting) (u BigMatrix, err error) {
+    return SampleMatrix(1, m.rows, setting.pk.N)
 }
 
 // step 3e of CTest-diff
-func HSeq(Hvs BigMatrix, setting Setting) (h_seq BigMatrix, err error) {
-    u, err := SampleUVector(setting)
+func HSeq(Hvs BigMatrix, mat_size int, setting Setting) (h_seq BigMatrix, err error) {
+    u, err := SampleUVector(Hvs, setting)
     if err != nil {return}
-    Hvs = CropMatrix(Hvs, 2*(setting.T+1))
+    Hvs = CropMatrix(Hvs, 2*mat_size)
     return MatEncLeftMul(u, Hvs, setting.pk)
 }
 

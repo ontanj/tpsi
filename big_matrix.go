@@ -148,7 +148,7 @@ func MatEncSub(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
 // matrix multiplication encrypted * plain
 func MatEncRightMul(encrypted, plain BigMatrix, pk *tcpaillier.PubKey) (c BigMatrix, err error) {
     if encrypted.cols != plain.rows {
-        panic(errors.New("matrices a and b are not compatible"))
+        panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", encrypted.rows, encrypted.cols, plain.rows, plain.cols))
     }
     cRows, cCols := encrypted.rows, plain.cols
     values := make([]*big.Int, cRows*cCols)
@@ -179,7 +179,7 @@ func MatEncRightMul(encrypted, plain BigMatrix, pk *tcpaillier.PubKey) (c BigMat
 // matrix multiplication plain * encrypted
 func MatEncLeftMul(plain, encrypted BigMatrix, pk *tcpaillier.PubKey) (c BigMatrix, err error) {
     if plain.cols != encrypted.rows {
-        panic(errors.New("matrices are not compatible"))
+        panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", plain.rows, plain.cols, encrypted.rows, encrypted.cols))
     }
     cRows, cCols := plain.rows, encrypted.cols
     values := make([]*big.Int, cRows*cCols)

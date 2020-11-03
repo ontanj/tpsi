@@ -150,12 +150,12 @@ func SampleMatrix(rows, cols int, q *big.Int) (a BigMatrix, err error) {
 }
 
 //step 1 of MMult
-func SampleRMatrices(setting Setting) (RAi_plain, RAi_enc, RBi_plain, RBi_enc BigMatrix, err error) {
-    RAi_plain, err = SampleMatrix(setting.T+1, setting.T+1, setting.pk.N)
+func SampleRMatrices(a, b BigMatrix, setting Setting) (RAi_plain, RAi_enc, RBi_plain, RBi_enc BigMatrix, err error) {
+    RAi_plain, err = SampleMatrix(a.rows, a.cols, setting.pk.N)
     if err != nil {return}
     RAi_enc, err = EncryptMatrix(RAi_plain, setting)
     if err != nil {return}
-    RBi_plain, err = SampleMatrix(setting.T+1, setting.T+1, setting.pk.N)
+    RBi_plain, err = SampleMatrix(b.rows, b.cols, setting.pk.N)
     if err != nil {return}
     RBi_enc, err = EncryptMatrix(RBi_plain, setting)
     if err != nil {return}
@@ -187,10 +187,10 @@ func GetCti(MA, MB, RA, RAi, RBi BigMatrix, setting Setting, secret_key *tcpaill
 }
 
 // calculates how many instances of MMult is needed to get all H,
-// according to: n = floor( log(k) )
+// according to: n = ceil( log(matrix size) )
 // H^2^n being the highest order needed
-func NbrMMultInstances(setting Setting) int {
-    return int(math.Floor(math.Log(float64(setting.T+1))))
+func NbrMMultInstances(m BigMatrix) int {
+    return int(math.Ceil(math.Log(float64(m.cols))))
 }
 
 // step 3f of CTest-diff

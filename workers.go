@@ -3,6 +3,7 @@ package tpsi
 import (
     "math/big"
     "github.com/niclabs/tcpaillier"
+    "fmt"
 )
 
 func CentralASSWorkerFunctionality(a *big.Int, sk *tcpaillier.KeyShare, setting Setting,
@@ -104,7 +105,7 @@ func CentralMultWorker(a, b *big.Int, sk *tcpaillier.KeyShare, setting Setting,
                        return_channel chan<- *big.Int) {
     
     a_share := CentralASSWorkerFunctionality(a, sk, setting, mask_channel, masks_channel, dec_channel)
-    
+
     // step 2: partial multiplication    
     prod, err := MultiplyEncrypted(b, a_share, setting)
     if err != nil {panic(err)}
@@ -279,105 +280,75 @@ func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaill
                                 mult_channel chan *big.Int,
                                 sub_channel chan BigMatrix,
                                 return_channel chan BigMatrix) {
-    
-    zt_channel := make(chan bool)
+    zeroTest := func (val *big.Int) bool {
+        zt_channel := make(chan bool)
+        if central {
+            go CentralZeroTestWorker(val, sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
+        } else {
+            go ZeroTestWorker(val, sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
+        }
+        return <-zt_channel
+    }
+    multiply := func (a, b *big.Int) *big.Int {
+        mul_channel := make(chan *big.Int)
+        if central {
+            go CentralMultWorker(a, b, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+        } else {
+            go MultWorker(a, b, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
+        }
+        return <-mul_channel
+    }
     var la int // degree of dividend
     for la = a.cols-1; la >= 0; la -= 1 { // find degree of divisor
-        if central {
-            go CentralZeroTestWorker(a.At(0,la), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
-        } else {
-            go ZeroTestWorker(a.At(0,la), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
-        }
-        if !(<-zt_channel) {
+        if !zeroTest(a.At(0,la)) {
             break
         }
     }
     var lb int // degree of divisor
     for lb = b.cols-1; lb >= 0; lb -= 1 { // find degree of divisor
-        if central {
-            go CentralZeroTestWorker(b.At(0,lb), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
-        } else {
-            go ZeroTestWorker(b.At(0,lb), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
-        }
-        if !(<-zt_channel) {
+        if !zeroTest(b.At(0,lb)) {
             break
         }
     }
     a_num := a
     q_num := make([]*big.Int, 1+la-lb)
     q_den := make([]*big.Int, 1+la-lb)
-    mul_channel := make(chan *big.Int)
 
     for i := la; i >= lb; i -= 1 { // start at highest degree coefficient, go until dividend smaller than divisor
-        if central { // skip 0 coefficents
-            go CentralZeroTestWorker(a_num.At(0, i), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
-        } else {
-            go ZeroTestWorker(a_num.At(0, i), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, zt_channel)
-        }
-        if <-zt_channel {
+        // skip 0 coefficents
+        if zeroTest(a_num.At(0,i)) {
             continue
         }
 
         pos := i-lb // entry in q at pos
 
         // q numerator: b_den * a_num
-        if central {
-            go CentralMultWorker(a_num.At(0, i), b_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-        } else {
-            go MultWorker(a_num.At(0, i), b_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-        }
-        num := <-mul_channel
+        num := multiply(a_num.At(0, i), b_den)
         q_num[pos] = num
 
         // q denominator: b_num * a_den
-        if central {
-            go CentralMultWorker(b.At(0, lb), a_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-        } else {
-            go MultWorker(b.At(0, lb), a_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-        }
-        den := <-mul_channel
+        den := multiply(b.At(0, lb), a_den)
         q_den[pos] = den
 
         // p = q_val * b
         p_num := NewBigMatrix(1, lb, nil) // partial result, size is degree of (partial) dividend - 1 = i , skip highest coefficient as it is cancelling
         for j := 0; j < lb; j += 1 {
-            if central {
-                go CentralMultWorker(num, b.At(0, j), sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-            } else {
-                go MultWorker(num, b.At(0, j), sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-            }
-            val := <-mul_channel
+            val := multiply(num, b.At(0, j))
             p_num.Set(0, j, val)
         }
-        p_den := den
+        p_den := multiply(den, b_den)
 
         // make common denominator for p and a
         r_num := NewBigMatrix(1, i, nil)
         for i := 0; i < r_num.cols; i += 1 {
-            if central {
-                go CentralMultWorker(a_num.At(0, i), p_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-            } else {
-                go MultWorker(a_num.At(0, i), p_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-            }
-            val := <-mul_channel
+            val := multiply(a_num.At(0, i), p_den)
             r_num.Set(0, i, val)
         }
         for i := 0; i < p_num.cols; i += 1 {
-            if central {
-                go CentralMultWorker(p_num.At(0, i), a_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-            } else {
-                go MultWorker(p_num.At(0, i), a_den, sk, setting, mask_channel, masks_channel, dec_channel, mul_channel)
-            }
-            val := <-mul_channel
+            val := multiply(p_num.At(0, i), a_den)
             p_num.Set(0, i, val)
         }
-        ret := make(chan *big.Int)
-        if central {
-            go CentralMultWorker(a_den, p_den, sk, setting, mask_channel, masks_channel, dec_channel, ret)
-        } else {
-            go MultWorker(a_den, p_den, sk, setting, mask_channel, masks_channel, dec_channel, ret)
-        }
-        r_den := <-ret
+        r_den := multiply(a_den, p_den)
 
         // subtract r2 = r1 - p
         r_num = divSub(r_num, p_num, setting)
@@ -403,4 +374,373 @@ func divSub(r, p BigMatrix, setting Setting) BigMatrix {
         r.Set(0, i+pos_diff, diff)
     }
     return r
+}
+
+func MinPolyWorker(seq BigMatrix, rec_ord int, sk *tcpaillier.KeyShare, setting Setting, central bool,
+                    mask_channel chan *big.Int,
+                    masks_channel chan []*big.Int,
+                    dec_channel chan *tcpaillier.DecryptionShare,
+                    shares_channel chan []*tcpaillier.DecryptionShare,
+                    mult_channel chan *big.Int,
+                    sub_channel chan BigMatrix,
+                    return_channel chan BigMatrix) {
+    // create r0
+    coeff, err := setting.pk.EncryptFixed(big.NewInt(1), big.NewInt(1))
+    a, err := EncryptedFixedZeroMatrix(1, seq.cols+1, setting)
+    if err != nil {panic(err)}
+    a.Set(0, seq.cols, coeff)
+
+    a_den, err := setting.pk.EncryptFixed(big.NewInt(1), big.NewInt(1))
+    if err != nil {panic(err)}
+
+    // create r1
+    b := seq
+    b_den, err := setting.pk.EncryptFixed(big.NewInt(1), big.NewInt(1))
+    if err != nil {panic(err)}
+
+    pol_div := make(chan BigMatrix)
+    
+    // create t0, t1
+    t0_num, err := EncryptedFixedZeroMatrix(1, 1, setting)
+    if err != nil {panic(err)}
+    t0_den, err := EncryptedFixedOneMatrix(1, 1, setting)
+    if err != nil {panic(err)}
+    t1_num, err := EncryptedFixedOneMatrix(1, 1, setting)
+    if err != nil {panic(err)}
+    t1_den, err := EncryptedFixedOneMatrix(1, 1, setting)
+    if err != nil {panic(err)}
+    
+    var t2_num BigMatrix
+    var t2_den BigMatrix
+    
+    for {
+        go PolynomialDivisionWorker(a, b, a_den, b_den, sk, setting, central, mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, pol_div)
+        q_num := <- pol_div
+        q_den := <- pol_div
+        r_num := <- pol_div
+        r_den := <- pol_div
+        t2_num, t2_den, err = nextT(t0_num, t0_den, t1_num, t1_den, q_num, q_den, sk, setting, central, mask_channel, masks_channel, dec_channel)
+        if err != nil {panic(err)}
+        if r_num.cols <= rec_ord {
+            break
+        }
+        a = b
+        a_den = b_den
+        b = r_num
+        b_den = r_den.At(0,0)
+        t0_num = t1_num
+        t0_den = t1_den
+        t1_num = t2_num
+        t1_den = t2_den
+    }
+    return_channel <- t2_num
+    return_channel <- t2_den
+}
+
+func nextT(t0_num, t0_den, t1_num, t1_den, q_num, q_den BigMatrix, sk *tcpaillier.KeyShare, setting Setting, central bool,
+            mask_channel chan *big.Int,
+            masks_channel chan []*big.Int,
+            dec_channel chan *tcpaillier.DecryptionShare) (t2_num, t2_den BigMatrix, err error) {
+    p_num, p_den, err := PolyMult(t1_num, t1_den, q_num, q_den, sk, setting, central, mask_channel, masks_channel, dec_channel)
+    if err != nil {return}
+    t2_num, t2_den, err = PolySub(t0_num, t0_den, p_num, p_den, sk, setting, central, mask_channel, masks_channel, dec_channel)
+    return
+}
+
+func PolySub(a_num, a_den, b_num, b_den BigMatrix, sk *tcpaillier.KeyShare, setting Setting, central bool,
+                mask_channel chan *big.Int,
+                masks_channel chan []*big.Int,
+                dec_channel chan *tcpaillier.DecryptionShare) (diff_num, diff_den BigMatrix, err error) {
+    if a_num.cols != a_den.cols || b_num.cols != b_den.cols {
+        panic("mismatched length of denominator")
+    }
+    var diff_l int
+    if a_num.cols > b_num.cols {
+        diff_l = a_num.cols
+    } else {
+        diff_l = b_num.cols
+    }
+    diff_num = NewBigMatrix(1, diff_l, nil)
+    diff_den = NewBigMatrix(1, diff_l, nil)
+    multiply := func (a, b *big.Int) *big.Int {
+        return_channel := make(chan *big.Int)
+        if central {
+            go CentralMultWorker(a, b, sk, setting, mask_channel, masks_channel, dec_channel, return_channel)
+        } else {
+            go MultWorker(a, b, sk, setting, mask_channel, masks_channel, dec_channel, return_channel)
+        }
+        return <-return_channel
+    }
+    var num *big.Int
+    var neg *big.Int
+    for i := 0; i < diff_l; i += 1 {
+        if i >= b_num.cols {
+            diff_num.Set(0, i, a_num.At(0, i))
+            diff_den.Set(0, i, a_den.At(0, i))
+        } else if i >= a_num.cols {
+            num, err = setting.pk.MultiplyFixed(b_num.At(0, i), big.NewInt(-1), big.NewInt(1))
+            if err != nil {return}
+            diff_num.Set(0, i, num)
+            diff_den.Set(0, i, b_den.At(0, i))
+        } else {
+            long_a_num := multiply(a_num.At(0, i), b_den.At(0, i))
+            long_b_num := multiply(b_num.At(0, i), a_den.At(0, i))
+            neg, err = setting.pk.MultiplyFixed(long_b_num, big.NewInt(-1), big.NewInt(1))
+            if err != nil {return}
+            num, err = setting.pk.Add(long_a_num, neg)
+            if err != nil {return}
+            diff_num.Set(0, i, num)
+            den := multiply(a_den.At(0, i), b_den.At(0, i))
+            diff_den.Set(0, i, den)
+        }
+    }
+    return
+}
+
+func PolyMult(a_num, a_den, b_num, b_den BigMatrix, sk *tcpaillier.KeyShare, setting Setting, central bool,
+                mask_channel chan *big.Int,
+                masks_channel chan []*big.Int,
+                dec_channel chan *tcpaillier.DecryptionShare) (prod_num, prod_den BigMatrix, err error) {
+    prod_num, err = EncryptedFixedZeroMatrix(1, a_num.cols+b_num.cols-1, setting)
+    if err != nil {return}
+    prod_den, err = EncryptedFixedOneMatrix(1, prod_num.cols, setting)
+    if err != nil {return}
+    multiply := func (a, b *big.Int) *big.Int {
+        return_channel := make(chan *big.Int)
+        if central {
+            go CentralMultWorker(a, b, sk, setting, mask_channel, masks_channel, dec_channel, return_channel)
+        } else {
+            go MultWorker(a, b, sk, setting, mask_channel, masks_channel, dec_channel, return_channel)
+        }
+        return <-return_channel
+    }
+    var new_num *big.Int
+    for i := 0; i < a_num.cols; i += 1 {
+        for j := 0; j < b_num.cols; j += 1 {
+            num := multiply(a_num.At(0,i), b_num.At(0,j))
+            current_num := prod_num.At(0, i+j)
+            
+            den := multiply(a_den.At(0,i), b_den.At(0,j))
+            current_den := prod_den.At(0, i+j)
+            
+            long_num := multiply(num, current_den)
+            long_current_num := multiply(current_num, den)
+            new_num, err = setting.pk.Add(long_num, long_current_num)
+            if err != nil {return}
+            prod_num.Set(0, i+j, new_num)
+            
+            new_den := multiply(den, current_den)
+            prod_den.Set(0, i+j, new_den)
+        }
+    }
+    return
+}
+
+func EncryptedFixedZeroMatrix(rows, cols int, setting Setting) (m BigMatrix, err error) {
+    var val *big.Int
+    m = NewBigMatrix(rows, cols, nil)
+    for i := range m.values {
+        val, err = setting.pk.EncryptFixed(big.NewInt(0), big.NewInt(1))
+        m.values[i] = val
+        if err != nil {return}
+    }
+    return
+}
+
+func EncryptedFixedOneMatrix(rows, cols int, setting Setting) (m BigMatrix, err error) {
+    var val *big.Int
+    m = NewBigMatrix(rows, cols, nil)
+    for i := range m.values {
+        val, err = setting.pk.EncryptFixed(big.NewInt(1), big.NewInt(1))
+        m.values[i] = val
+        if err != nil {return}
+    }
+    return
+}
+
+func CentralMatrixMultiplicationWorker(a, b BigMatrix, sk *tcpaillier.KeyShare, setting Setting,
+                                    mats_channels []chan BigMatrix,
+                                    dec_channels []chan PartialMatrix,
+                                    return_channel chan<- BigMatrix) {
+    if a.cols != b.rows {
+        panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", a.rows, a.cols, b.rows, b.cols))
+    }
+    
+    // step 1
+    RAs_crypt := make([]BigMatrix, setting.n)
+    RBs_crypt := make([]BigMatrix, setting.n)
+    RAi_clear, RAi_crypt, RBi_clear, RBi_crypt, err := SampleRMatrices(a, b, setting)
+    if err != nil {panic(err)}
+    RAs_crypt[0] = RAi_crypt
+    RBs_crypt[0] = RBi_crypt
+    for i := 1; i < setting.n; i += 1 {
+        RAs_crypt[i] = <-mats_channels[i-1]
+        RBs_crypt[i] = <-mats_channels[i-1]
+    }
+
+    // step 2
+    RA, MA, MB, err := GetMulMatrices(a, b, RAs_crypt, RBs_crypt, setting)
+    if err != nil {panic(err)}
+    for i := 0; i < setting.n-1; i += 1 {
+        mats_channels[i] <- RA
+        mats_channels[i] <- MA
+        mats_channels[i] <- MB
+    }
+
+    // step 3
+    cts := make([]BigMatrix, setting.n)
+    MA_parts := make([]PartialMatrix, setting.n)
+    MB_parts := make([]PartialMatrix, setting.n)
+    cti, MA_part, MB_part, err := GetCti(MA, MB, RA, RAi_clear, RBi_clear, setting, sk)
+    if err != nil {panic(err)}
+    cts[0] = cti
+    MA_parts[0] = MA_part
+    MB_parts[0] = MB_part
+    for i := 1; i < setting.n; i += 1 {
+        cts[i] = <-mats_channels[i-1]
+        MA_parts[i] = <-dec_channels[i-1]
+        MB_parts[i] = <-dec_channels[i-1]
+    }
+
+    // step 4
+    AB, err := CombineMatrixMultiplication(MA_parts, MB_parts, cts, setting)
+    for i := 0; i < setting.n-1; i += 1 {
+        mats_channels[i] <- AB
+    }
+
+    return_channel <- AB
+
+}
+
+func MatrixMultiplicationWorker(a, b BigMatrix, sk *tcpaillier.KeyShare, setting Setting,
+                                mat_channel chan BigMatrix,
+                                dec_channel chan<- PartialMatrix,
+                                return_channel chan<- BigMatrix) {
+    if a.cols != b.rows {
+        panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", a.rows, a.cols, b.rows, b.cols))
+    }
+
+    // step 1
+    RAi_clear, RAi_crypt, RBi_clear, RBi_crypt, err := SampleRMatrices(a, b, setting)
+    if err != nil {panic(err)}
+    mat_channel <- RAi_crypt
+    mat_channel <- RBi_crypt
+
+    // step 2
+    RA := <- mat_channel
+    MA := <- mat_channel
+    MB := <- mat_channel
+
+    // step 3
+    cti, MA_part, MB_part, err := GetCti(MA, MB, RA, RAi_clear, RBi_clear, setting, sk)
+    if err != nil {panic(err)}
+    mat_channel <- cti
+    dec_channel <- MA_part
+    dec_channel <- MB_part
+
+    // step 4
+    AB := <-mat_channel
+
+    return_channel <- AB
+}
+
+func CentralSingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting Setting,
+                                mats_channels []chan BigMatrix,
+                                pm_channels []chan PartialMatrix,
+                                mask_channel chan *big.Int,
+                                masks_channel chan []*big.Int,
+                                dec_channel chan *tcpaillier.DecryptionShare,
+                                shares_channel chan []*tcpaillier.DecryptionShare,
+                                mult_channel chan *big.Int,
+                                sub_channel chan BigMatrix,
+                                return_channel chan bool) {
+    // step b
+    v, err := SampleVVector(m, setting)
+    if err != nil {panic(err)}
+    for i := 0; i < setting.n-1; i += 1 {
+        mats_channels[i] <- v
+    }
+
+    // step c
+    its := NbrMMultInstances(m)
+    mats := make([]BigMatrix, its+1)
+    mats[0] = m
+    ret := make(chan BigMatrix)
+    for i := 0; i < its; i += 1 {
+        go CentralMatrixMultiplicationWorker(mats[i], mats[i], sk, setting, mats_channels, pm_channels, ret)
+        mats[i+1] = <-ret
+    }
+
+    //step d
+    semi_seq := v
+    for _, mat := range mats {
+        go CentralMatrixMultiplicationWorker(mat, semi_seq, sk, setting, mats_channels, pm_channels, ret)
+        new_semi_seq := <-ret
+        semi_seq = ConcatenateMatrices(new_semi_seq, semi_seq)
+    }
+
+    // step e
+    seq, err := HSeq(semi_seq, m.cols, setting)
+    if err != nil {panic(err)}
+
+    // distribute seq instead of decrypted secret sharing
+    for i := 0; i < setting.n-1; i += 1 {
+        mats_channels[i] <- seq
+    }
+
+    // step i
+    rec_ord := m.cols
+    go MinPolyWorker(seq, rec_ord, sk, setting, true, mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, ret)
+    min_poly := <-ret
+    <-ret
+
+    retu := make(chan bool)
+    go CentralZeroTestWorker(min_poly.At(0,0), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, retu)
+
+    return_channel <- <-retu
+}
+
+func SingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting Setting,
+                            mats_channel chan BigMatrix,
+                            pm_channel chan PartialMatrix,
+                            mask_channel chan *big.Int,
+                            masks_channel chan []*big.Int,
+                            dec_channel chan *tcpaillier.DecryptionShare,
+                            shares_channel chan []*tcpaillier.DecryptionShare,
+                            mult_channel chan *big.Int,
+                            sub_channel chan BigMatrix,
+                            return_channel chan bool) {
+    // step b
+    v := <-mats_channel
+
+    // step c
+    its := NbrMMultInstances(m)
+    mats := make([]BigMatrix, its+1)
+    mats[0] = m
+    mm_ret := make(chan BigMatrix)
+    for i := 0; i < its; i += 1 {
+        go MatrixMultiplicationWorker(mats[i], mats[i], sk, setting, mats_channel, pm_channel, mm_ret)
+        mats[i+1] = <-mm_ret
+    }
+
+    //step d
+    semi_seq := v
+    for i := range mats {
+        go MatrixMultiplicationWorker(mats[i], semi_seq, sk, setting, mats_channel, pm_channel, mm_ret)
+        new_semi_seq := <-mm_ret
+        semi_seq = ConcatenateMatrices(new_semi_seq, semi_seq)
+    }
+
+    seq := <-mats_channel
+
+    // step i
+    rec_ord := m.cols
+    go MinPolyWorker(seq, rec_ord, sk, setting, false, mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, mm_ret)
+    min_poly := <-mm_ret
+    <-mm_ret
+
+    retu := make(chan bool)
+    go ZeroTestWorker(min_poly.At(0,0), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, retu)
+
+    return_channel <- <-retu
 }

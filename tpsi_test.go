@@ -137,7 +137,7 @@ func CompareEnc(enc, plain BigMatrix, sks []*tcpaillier.KeyShare, setting Settin
                 t.Error(err)
             }
             if dec_plaintext.Cmp(plain.At(i,j)) != 0 {
-                t.Errorf("decrypted values is wrong for (%d, %d)", i, j)
+                t.Errorf("decrypted values is wrong for (%d, %d), expected %d, got %d", i, j, plain.At(i,j), dec_plaintext)
             }
         }
     }
@@ -149,7 +149,6 @@ func TestMMult(t *testing.T) {
     AB_corr := MatMul(A, B)
     var setting Setting
     setting.n = 4
-    setting.T = 2
     sks, pk, _ := GenerateKeys(512, 1, setting.n)
     setting.pk = pk
     A, _ = EncryptMatrix(A, setting)
@@ -161,7 +160,7 @@ func TestMMult(t *testing.T) {
     RAs_crypt := make([]BigMatrix, setting.n)
     RBs_crypt := make([]BigMatrix, setting.n)
     for i := 0; i < setting.n; i += 1 {
-        RAi_clear, RAi_crypt, RBi_clear, RBi_crypt, err := SampleRMatrices(setting)
+        RAi_clear, RAi_crypt, RBi_clear, RBi_crypt, err := SampleRMatrices(A, B, setting)
         if err != nil {t.Error(err)}
         RAs_clear[i] = RAi_clear
         RAs_crypt[i] = RAi_crypt
