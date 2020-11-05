@@ -11,12 +11,12 @@ func TestCPHankelMatrix(t *testing.T) {
     setting.m = 3
     setting.T = 2
     setting.n = 4
-    _, pk, err := GenerateKeys(512, 1, setting.n)
+    sks, pk, err := GenerateKeys(512, 1, setting.n)
     if err != nil {t.Error(err)}
     setting.pk = pk
     q := big.NewInt(11)
     u := big.NewInt(6)
-    H := CPComputeHankelMatrix(items, u, q, setting)
+    H, err := CPComputeHankelMatrix(items, u, q, setting)
     H_corr := NewBigMatrix(3, 3, sliceToBigInt([]int64{9,27,12,27,12,18,12,18,24}))
     t.Run("check dimensions", func(t *testing.T){
         if H.rows != setting.T + 1 || H.cols != setting.T + 1 {
@@ -26,7 +26,8 @@ func TestCPHankelMatrix(t *testing.T) {
     t.Run("check elements", func(t *testing.T){
         for i := 0; i < 3; i += 1 {
             for j := 0; j < 3; j += 1 {
-                if H.At(i,j).Cmp(H_corr.At(i,j)) != 0 {
+                val := t_decrypt(H.At(i,j), sks, setting)
+                if val.Cmp(H_corr.At(i,j)) != 0 {
                     t.Error("incorrect values")
                 }
             }

@@ -10,10 +10,11 @@ func SampleInt(q *big.Int) (*big.Int, error) {
     return rand.Int(rand.Reader, q)
 }
 
-// compute the unencrypted Hankel Matrix for the central party
-func CPComputeHankelMatrix(items []int64, u, q *big.Int, setting Setting) BigMatrix {
-    H := ComputeHankelMatrix(items, u, q, setting)
-    return MatScaMul(H, int64(setting.n-1))
+// compute the encrypted Hankel Matrix for central party
+func CPComputeHankelMatrix(items []int64, u, q *big.Int, setting Setting) (H BigMatrix, err error) {
+    H = ComputePlainHankelMatrix(items, u, q, setting)
+    H = MatScaMul(H, int64(setting.n-1))
+    return EncryptMatrix(H, setting)
 }
 
 //step 3b of CTest-diff

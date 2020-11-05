@@ -475,11 +475,17 @@ func TestSingularityTestWorker(t *testing.T) {
     sks, pk, err := GenerateKeys(512, 1, 4)
     if err != nil {t.Error(err)}
     setting.pk = pk
-    sing := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6, 2, 4, 6}))
+    sing := NewBigMatrix(4, 4, sliceToBigInt([]int64{1, 2, 3, 5,
+                                                     4, 5, 6, 9,
+                                                     2, 4, 6, 10,
+                                                     7, 11, 15, 24}))
     sing, err = EncryptMatrix(sing, setting)
     if err != nil {t.Error(err)}
     
-    non_sing := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 1, 0, 2, 0, 1, 0, 0, 1}))
+    non_sing := NewBigMatrix(4, 4, sliceToBigInt([]int64{1, 1, 0, 0,
+                                                         2, 0, 1, 2,
+                                                         0, 0, 1, 1,
+                                                         1, 0, 1, 1}))
     non_sing, err = EncryptMatrix(non_sing, setting)
     if err != nil {t.Error(err)}
 
@@ -518,4 +524,88 @@ func TestSingularityTestWorker(t *testing.T) {
             t.Error("should not be singular")
         }
     }
+}
+
+func TestCardinalityTestWorker(t *testing.T) {
+    t.Run("below threshold", func (t *testing.T) {
+        var setting Setting
+        setting.n = 4
+        sks, pk, err := GenerateKeys(512, 1, setting.n)
+        if err != nil {t.Error(err)}
+        setting.pk = pk
+        setting.T = 8
+        setting.m = 4
+        all_items := make([][]int64, setting.n)
+        all_items[0] = []int64{1,2,5,6}
+        all_items[1] = []int64{1,2,10,11}
+        all_items[2] = []int64{1,2,15,16}
+        all_items[3] = []int64{1,2,18,19}
+        
+        num_channel := make(chan *big.Int)
+        mat_channel := make(chan BigMatrix)
+        mat_channel2 := make(chan BigMatrix)
+        mats_channels := make([]chan BigMatrix, setting.n-1)
+        pm_channels := make([]chan PartialMatrix, setting.n-1)
+        mask_channel := make(chan *big.Int)
+        masks_channel := make(chan []*big.Int)
+        dec_channel := make(chan *tcpaillier.DecryptionShare)
+        shares_channel := make(chan []*tcpaillier.DecryptionShare)
+        mult_channel := make(chan *big.Int)
+        sub_channel := make(chan BigMatrix)
+        return_channel := make(chan bool)
+
+        for i := 0; i < setting.n-1; i += 1 {
+            mats_channels[i] = make(chan BigMatrix)
+            pm_channels[i] = make(chan PartialMatrix)
+            go CardinalityTestWorker(all_items[i], sks[i], setting, false, num_channel, mat_channel, mat_channel2, mats_channels[i], pm_channels[i], mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, return_channel)
+        }
+        go CentralCardinalityTestWorker(all_items[setting.n-1], sks[setting.n-1], setting, true, num_channel, mat_channel, mat_channel2, mats_channels, pm_channels, mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, return_channel)
+
+        for i := 0; i < setting.n; i += 1 {
+            if !<-return_channel {
+                t.Error("cardinality test is false despite below threshold")
+            }
+        }
+    })
+
+    t.Run("above threshold", func (t *testing.T) {
+        var setting Setting
+        setting.n = 4
+        sks, pk, err := GenerateKeys(512, 1, setting.n)
+        if err != nil {t.Error(err)}
+        setting.pk = pk
+        setting.T = 7
+        setting.m = 6
+        all_items := make([][]int64, setting.n)
+        all_items[0] = []int64{1,2,3,4,5,6}
+        all_items[1] = []int64{1,2,3,4,10,11}
+        all_items[2] = []int64{1,2,3,4,15,16}
+        all_items[3] = []int64{1,2,3,4,20,21}
+        
+        num_channel := make(chan *big.Int)
+        mat_channel := make(chan BigMatrix)
+        mat_channel2 := make(chan BigMatrix)
+        mats_channels := make([]chan BigMatrix, setting.n-1)
+        pm_channels := make([]chan PartialMatrix, setting.n-1)
+        mask_channel := make(chan *big.Int)
+        masks_channel := make(chan []*big.Int)
+        dec_channel := make(chan *tcpaillier.DecryptionShare)
+        shares_channel := make(chan []*tcpaillier.DecryptionShare)
+        mult_channel := make(chan *big.Int)
+        sub_channel := make(chan BigMatrix)
+        return_channel := make(chan bool)
+
+        for i := 0; i < setting.n-1; i += 1 {
+            mats_channels[i] = make(chan BigMatrix)
+            pm_channels[i] = make(chan PartialMatrix)
+            go CardinalityTestWorker(all_items[i], sks[i], setting, false, num_channel, mat_channel, mat_channel2, mats_channels[i], pm_channels[i], mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, return_channel)
+        }
+        go CentralCardinalityTestWorker(all_items[setting.n-1], sks[setting.n-1], setting, true, num_channel, mat_channel, mat_channel2, mats_channels, pm_channels, mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, return_channel)
+
+        for i := 0; i < setting.n; i += 1 {
+            if <-return_channel {
+                t.Error("cardinality test is true despite above threshold")
+            }
+        }
+    })
 }

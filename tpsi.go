@@ -38,7 +38,8 @@ func elMulSlice(sl1, sl2 []*big.Int, q *big.Int) []*big.Int {
 }
 
 // compute the Hankel Matrix for items and (random) u.
-func ComputeHankelMatrix(items []int64, u, q *big.Int, setting Setting) BigMatrix {
+func ComputePlainHankelMatrix(items []int64, u, q *big.Int, setting Setting) BigMatrix {
+    // u = big.NewInt(3)
     u_list := make([]*big.Int, setting.m) // stores u^a^i for each a
     u1_list := make([]*big.Int, setting.m) // stores u^a for each a
     H := NewBigMatrix(setting.T + 1, setting.T + 1, nil)
@@ -56,7 +57,7 @@ func ComputeHankelMatrix(items []int64, u, q *big.Int, setting Setting) BigMatri
             stopCol = i + 1
         } else {
             startCol = i - setting.T
-            stopCol = 3
+            stopCol = setting.T + 1
         }
         el := sumSlice(u_list, q)
         for j := startCol; j < stopCol; j += 1 { // each matrix entry with current element
@@ -68,6 +69,12 @@ func ComputeHankelMatrix(items []int64, u, q *big.Int, setting Setting) BigMatri
         u_list = elMulSlice(u_list, u1_list, q)
     }
     return H
+}
+
+// compute and encrypt the Hankel Matrix for items and (random) u.
+func ComputeHankelMatrix(items []int64, u *big.Int, setting Setting) (BigMatrix, error) {
+    H := ComputePlainHankelMatrix(items, u, setting.pk.N, setting)
+    return EncryptMatrix(H, setting)
 }
 
 // encrypt single value
@@ -190,7 +197,7 @@ func GetCti(MA, MB, RA, RAi, RBi BigMatrix, setting Setting, secret_key *tcpaill
 // according to: n = ceil( log(matrix size) )
 // H^2^n being the highest order needed
 func NbrMMultInstances(m BigMatrix) int {
-    return int(math.Ceil(math.Log(float64(m.cols))))
+    return int(math.Ceil(math.Log2(float64(m.cols))))
 }
 
 // step 3f of CTest-diff

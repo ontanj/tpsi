@@ -311,8 +311,10 @@ func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaill
         }
     }
     a_num := a
-    q_num := make([]*big.Int, 1+la-lb)
-    q_den := make([]*big.Int, 1+la-lb)
+    q_num, err := EncryptedFixedZeroMatrix(1, 1+la-lb, setting)
+    if err != nil {panic(err)}
+    q_den, err := EncryptedFixedOneMatrix(1, 1+la-lb, setting)
+    if err != nil {panic(err)}
 
     for i := la; i >= lb; i -= 1 { // start at highest degree coefficient, go until dividend smaller than divisor
         // skip 0 coefficents
@@ -324,11 +326,11 @@ func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaill
 
         // q numerator: b_den * a_num
         num := multiply(a_num.At(0, i), b_den)
-        q_num[pos] = num
+        q_num.Set(0, pos, num)
 
         // q denominator: b_num * a_den
         den := multiply(b.At(0, lb), a_den)
-        q_den[pos] = den
+        q_den.Set(0, pos, den)
 
         // p = q_val * b
         p_num := NewBigMatrix(1, lb, nil) // partial result, size is degree of (partial) dividend - 1 = i , skip highest coefficient as it is cancelling
@@ -358,8 +360,16 @@ func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaill
 
     }
 
-    return_channel <- NewBigMatrix(1, len(q_num), q_num)
-    return_channel <- NewBigMatrix(1, len(q_den), q_den)
+    // remove initial zero coefficients
+    var lr int
+    for lr = a_num.cols-1; lr >= 0; lr -=1 {
+        if !zeroTest(a_num.At(0,lr)) {
+            break
+        }
+    }
+    a_num = NewBigMatrix(1, lr+1, a_num.values[0:lr+1])
+    return_channel <- q_num
+    return_channel <- q_den
     return_channel <- a_num
     return_channel <- NewBigMatrix(1, 1, []*big.Int{a_den})
 }
@@ -412,13 +422,13 @@ func MinPolyWorker(seq BigMatrix, rec_ord int, sk *tcpaillier.KeyShare, setting 
     
     var t2_num BigMatrix
     var t2_den BigMatrix
-    
+
     for {
         go PolynomialDivisionWorker(a, b, a_den, b_den, sk, setting, central, mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, pol_div)
-        q_num := <- pol_div
-        q_den := <- pol_div
-        r_num := <- pol_div
-        r_den := <- pol_div
+        q_num := <-pol_div
+        q_den := <-pol_div
+        r_num := <-pol_div
+        r_den := <-pol_div
         t2_num, t2_den, err = nextT(t0_num, t0_den, t1_num, t1_den, q_num, q_den, sk, setting, central, mask_channel, masks_channel, dec_channel)
         if err != nil {panic(err)}
         if r_num.cols <= rec_ord {
@@ -644,6 +654,7 @@ func MatrixMultiplicationWorker(a, b BigMatrix, sk *tcpaillier.KeyShare, setting
     return_channel <- AB
 }
 
+// outputs true through return_channel if m is singular
 func CentralSingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting Setting,
                                 mats_channels []chan BigMatrix,
                                 pm_channels []chan PartialMatrix,
@@ -700,6 +711,7 @@ func CentralSingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting 
     return_channel <- <-retu
 }
 
+// outputs true through return_channel if m is singular
 func SingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting Setting,
                             mats_channel chan BigMatrix,
                             pm_channel chan PartialMatrix,
@@ -743,4 +755,60 @@ func SingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting Setting
     go ZeroTestWorker(min_poly.At(0,0), sk, setting, mask_channel, masks_channel, dec_channel, shares_channel, retu)
 
     return_channel <- <-retu
+}
+
+func CentralCardinalityTestWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, central bool,
+                                num_channel chan<- *big.Int,
+                                mat_channel <-chan BigMatrix,
+                                mat_channel2 chan<- BigMatrix,
+                                mats_channels []chan BigMatrix,
+                                pm_channels []chan PartialMatrix,
+                                mask_channel chan *big.Int,
+                                masks_channel chan []*big.Int,
+                                dec_channel chan *tcpaillier.DecryptionShare,
+                                shares_channel chan []*tcpaillier.DecryptionShare,
+                                mult_channel chan *big.Int,
+                                sub_channel chan BigMatrix,
+                                return_channel chan bool) {
+    u, err := SampleInt(setting.pk.N)
+    if err != nil {panic(err)}
+    for i := 1; i < setting.n; i += 1 {
+        num_channel <- u
+    }
+    H, err := CPComputeHankelMatrix(items, u, setting.pk.N, setting)
+    if err != nil {panic(err)}
+    for i := 1; i < setting.n; i += 1 {
+        Hi := <-mat_channel
+        H, err = MatEncSub(H, Hi, setting.pk)
+        if err != nil {panic(err)}
+    }
+    for i := 1; i < setting.n; i += 1 {
+        mat_channel2 <- H
+    }
+    
+    go CentralSingularityTestWorker(H, sk, setting, mats_channels, pm_channels, mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, return_channel)
+
+}
+
+func CardinalityTestWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, central bool,
+                            num_channel <-chan *big.Int,
+                            mat_channel chan<- BigMatrix,
+                            mat_channel2 <-chan BigMatrix,
+                            mats_channel chan BigMatrix,
+                            pm_channel chan PartialMatrix,
+                            mask_channel chan *big.Int,
+                            masks_channel chan []*big.Int,
+                            dec_channel chan *tcpaillier.DecryptionShare,
+                            shares_channel chan []*tcpaillier.DecryptionShare,
+                            mult_channel chan *big.Int,
+                            sub_channel chan BigMatrix,
+                            return_channel chan bool) {
+    u := <- num_channel
+    H1, err := ComputeHankelMatrix(items, u, setting)
+    if err != nil {panic(err)}
+    mat_channel <- H1
+    H := <-mat_channel2
+
+    go SingularityTestWorker(H, sk, setting, mats_channel, pm_channel, mask_channel, masks_channel, dec_channel, shares_channel, mult_channel, sub_channel, return_channel)
+
 }

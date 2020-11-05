@@ -17,7 +17,7 @@ func TestHankelMatrix(t *testing.T) {
     setting.pk = pk
     q := big.NewInt(11)
     u := big.NewInt(6)
-    H := ComputeHankelMatrix(items, u, q, setting)
+    H := ComputePlainHankelMatrix(items, u, q, setting)
     H_corr := NewBigMatrix(3, 3, sliceToBigInt([]int64{3,9,4,9,4,6,4,6,8}))
     t.Run("check dimensions", func(t *testing.T){
         if H.rows != setting.T + 1 || H.cols != setting.T + 1 {
