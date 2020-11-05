@@ -126,9 +126,9 @@ func MatEncAdd(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
 // matrix subtraction of encrypted matrices
 func MatEncSub(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
     if a.rows != b.rows {
-        panic(errors.New("row mismatch in addition"))
+        panic(errors.New("row mismatch in subtraction"))
     } else if a.cols != b.cols {
-        panic(errors.New("column mismatch in addition"))
+        panic(errors.New("column mismatch in subtraction"))
     }
     c := NewBigMatrix(a.rows, a.cols, nil)
     for i := range c.values {
