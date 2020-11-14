@@ -13,7 +13,7 @@ func SampleInt(q *big.Int) (*big.Int, error) {
 // compute the encrypted Hankel Matrix for central party
 func CPComputeHankelMatrix(items []int64, u, q *big.Int, setting Setting) (H BigMatrix, err error) {
     H = ComputePlainHankelMatrix(items, u, q, setting)
-    H = MatScaMul(H, int64(setting.n-1))
+    H = MatScaMul(H, big.NewInt(int64(setting.n-1)))
     return EncryptMatrix(H, setting)
 }
 

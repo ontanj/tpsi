@@ -96,11 +96,10 @@ func MatSub(a, b BigMatrix) BigMatrix {
 }
 
 // scalar multiplication of matrix for unencryted values
-func MatScaMul(a BigMatrix, b int64) BigMatrix {
+func MatScaMul(a BigMatrix, b *big.Int) BigMatrix {
     c := NewBigMatrix(a.rows, a.cols, nil)
-    bb := big.NewInt(b)
     for i := range c.values {
-        c.values[i].Mul(a.values[i], bb)
+        c.values[i].Mul(a.values[i], b)
     }
     return c
 }

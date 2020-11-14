@@ -180,7 +180,7 @@ func TestSubtraction(t *testing.T) {
 
 func TestScalarMultiplication(t *testing.T) {
     a := NewBigMatrix(2, 3, sliceToBigInt([]int64{3, 4, 2, 1, 8, 5}))
-    b := int64(2)
+    b := big.NewInt(int64(2))
     c := NewBigMatrix(2, 3, sliceToBigInt([]int64{6, 8, 4, 2, 16, 10}))
     d := MatScaMul(a, b)
     ComparePlain(2, 3, c, d, t)
