@@ -272,3 +272,68 @@ func TestMPC(t *testing.T) {
         }
     })
 }
+
+func TestEvalPoly(t *testing.T) {
+    p := NewBigMatrix(1, 3, sliceToBigInt([]int64{2,4,3}))
+    x := []int64{0,1,2}
+    y := sliceToBigInt([]int64{2,9,0})
+    mod := big.NewInt(11)
+    for i := 0; i < len(x); i += 1 {
+        ev_y := EvalPoly(p, x[i], mod)
+        if ev_y.Cmp(y[i]) != 0 {
+            t.Errorf("expected %d, got %d", y[i], ev_y)
+        }
+    }
+}
+
+func TestPolyMult(t *testing.T) {
+    a := NewBigMatrix(1, 3, sliceToBigInt([]int64{3,2,1}))
+    b := NewBigMatrix(1, 3, sliceToBigInt([]int64{2,4,1}))
+    ab_corr := NewBigMatrix(1, 5, sliceToBigInt([]int64{6,16,13,6,1}))
+    ab := MultPoly(a, b)
+    for i := 0; i < ab_corr.cols; i += 1 {
+        if ab_corr.At(0,i).Cmp(ab.At(0,i)) != 0 {
+            t.Errorf("error at %d: expected %d, got %d", i, ab_corr.At(0,i), ab.At(0,i))
+        }
+    }
+    if ab.cols != ab_corr.cols {
+        t.Errorf("length mismatch: expected %d, got %d", ab_corr.cols, ab.cols)
+    }
+}
+
+func TestPolyFromRoots(t *testing.T) {
+    roots := []int64{1, 2}
+    poly := NewBigMatrix(1,3, sliceToBigInt([]int64{2,8,1}))
+    mod := big.NewInt(11)
+    rpol := PolyFromRoots(roots, mod)
+    for i := 0; i < poly.cols; i += 1 {
+        if poly.At(0,i).Cmp(rpol.At(0,i)) != 0 {
+            t.Errorf("error at %d: expected %d, got %d", i, poly.At(0,i), rpol.At(0,i))
+        }
+    }
+    if poly.cols != rpol.cols {
+        t.Errorf("length mismatch: expected %d, got %d", poly.cols, rpol.cols)
+    }
+}
+
+func TestIntersectionFunc(t *testing.T) {
+    vs := NewBigMatrix(1, 7, sliceToBigInt([]int64{19, 6, 7, 12, 4, 5, 7}))//, 18, 16, 18}))
+    ps := NewBigMatrix(1, 7, sliceToBigInt([]int64{22, 21, 5, 20, 20, 5, 21}))//, 22, 8, 2}))
+    // v_corr := []*big.Int{21,6,12,2,1}
+    p_corr := sliceToBigInt([]int64{14,7,1})
+    var setting Setting
+    _, pk, _ := GenerateKeys(512, 1, 4)
+    setting.pk = pk
+    setting.pk.N = big.NewInt(23)
+    setting.T = 1
+    p := Intersection(vs, ps, setting)
+    if len(p_corr) != p.cols {
+        t.Errorf("wrong degree on interpolated polynomial; expected %d, got %d", len(p_corr), p.cols)
+    } else {
+        for i, p_coeff := range p_corr {
+            if p_coeff.Cmp(p.At(0,i)) != 0 {
+                t.Errorf("expected %d, got %d", p_coeff, p.At(0,i))
+            }
+        }
+    }
+}

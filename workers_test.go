@@ -6,6 +6,7 @@ import (
     "github.com/niclabs/tcpaillier"
 )
 
+// create a slice of n chan interface{}
 func create_chans(n int) []chan interface{} {
     channels := make([]chan interface{}, n)
     for i := 0; i < n; i += 1 {
@@ -241,7 +242,7 @@ func TestPolynomialDivisionWorkers(t *testing.T) {
     
 }
 
-func TestPolyMult(t *testing.T) {
+func TestEncryptedPolyMult(t *testing.T) {
     var setting Setting
     setting.n = 4
     sks, pk, err := GenerateKeys(512, 1, 4)
@@ -553,4 +554,88 @@ func TestCardinalityTestWorker(t *testing.T) {
             }
         }
     })
+}
+
+func TestIntersectionPoly(t *testing.T) {
+    items := [][]int64{[]int64{1,3,4,5},
+                       []int64{1,3,6,7},
+                       []int64{1,3,8,9},
+                       []int64{1,3,10,11}}
+    var setting Setting
+    setting.n = 4
+    sks, pk, err := GenerateKeys(512, 1, setting.n)
+    if err != nil {t.Error(err)}
+    setting.pk = pk
+    setting.T = 8
+    roots := make([]BigMatrix, 4)
+    for i := range items {
+        roots[i] = PolyFromRoots(items[i], setting.pk.N)
+    }
+    channels := create_chans(setting.n)
+    ret := make(chan BigMatrix)
+    go CentralIntersectionPolyWorker(roots[setting.n-1], sks[setting.n-1], setting, channels, ret)
+    for i := 0; i < setting.n-1; i += 1 {
+        go OuterIntersectionPolyWorker(roots[i], sks[i], setting, channels[i], ret)
+    }
+    for i := 0; i < setting.n; i += 1 {
+        v := <-ret
+        j := 0
+        for ; j < 2; j += 1 {
+            if v.At(0,j).Cmp(big.NewInt(0)) != 0 {
+                t.Errorf("root lost at %d", j+1)
+            }
+        }
+        for ; j < v.cols; j += 1 {
+            if v.At(0,j).Cmp(big.NewInt(0)) == 0 {
+                t.Errorf("additional root at %d", j+1)
+            }
+        }
+    }
+}
+
+func TestIntersection(t *testing.T) {
+    var setting Setting
+    setting.n = 4
+    items := [][]int64{
+        []int64{100,102,202,204,206},
+        []int64{100,102,302,304,306},
+        []int64{100,102,402,404,406},
+        []int64{100,102,502,504,506}}
+    no_shared := 2
+    no_unique := 3
+    setting.T = no_unique * setting.n
+    sks, pk, err := GenerateKeys(512, 1, setting.n)
+    if err != nil {panic(err)}
+    setting.pk = pk
+    channels := create_chans(setting.n-1)
+    return_channels := make([]chan []int64, setting.n)
+    for i := 0; i < setting.n-1; i += 1 {
+        return_channels[i] = make(chan []int64)
+        go IntersectionWorker(items[i], sks[i], setting, false, nil, channels[i], return_channels[i])
+    }
+    return_channels[setting.n-1] = make(chan []int64)
+    go IntersectionWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil, return_channels[setting.n-1])
+
+    for i := 0; i < setting.n; i += 1 {
+        shared := <-return_channels[i]
+        if len(shared) != no_shared {
+            t.Errorf("wrong number of shared elements; expected %d, got %d", no_shared, len(shared))
+        } else {
+            for j := 0; j < no_shared; j += 1 {
+                if shared[j] != items[i][j] {
+                    t.Errorf("shared item missed for party %d, expected %d, got %d", i, items[i][j], shared[j])
+                }
+            }
+        }
+        unique := <-return_channels[i]
+        if len(unique) != no_unique {
+            t.Errorf("wrong number of unique elements; expected %d, got %d", no_unique, len(unique))
+        } else {
+            for j := 0; j < no_unique; j += 1 {
+                if unique[j] != items[i][j+no_shared] {
+                    t.Errorf("unique item missed for party %d, expected %d, got %d", i, items[i][j+no_shared], unique[j])
+                }
+            }
+        }
+    }
 }

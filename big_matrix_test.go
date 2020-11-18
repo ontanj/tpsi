@@ -341,3 +341,16 @@ func TestCropMatrix(t *testing.T) {
     b := NewBigMatrix(3, 2, sliceToBigInt([]int64{2, 3, 5, 6, 8, 9}))
     ComparePlain(3, 2, a, b, t)
 }
+
+func TestMod(t *testing.T) {
+    a := NewBigMatrix(3, 2, sliceToBigInt([]int64{9,4,6,3,8,6}))
+    b := NewBigMatrix(3, 2, sliceToBigInt([]int64{0,1,0,0,2,0}))
+    a = MatMod(a, big.NewInt(3))
+    for i := 0; i < 3; i += 1 {
+        for j := 0; j < 2; j += 1 {
+            if a.At(i,j).Cmp(b.At(i,j)) != 0 {
+                t.Errorf("(%d,%d) :expected %d, got %d", i, j, a.At(i,j), b.At(i,j))
+            }
+        }
+    }
+}

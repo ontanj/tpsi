@@ -705,3 +705,182 @@ func OuterCardinalityTestWorker(items []int64, sk *tcpaillier.KeyShare, setting 
     go OuterSingularityTestWorker(H, sk, setting, channel, return_channel)
 
 }
+
+// step 3 of TPSI-diff
+func CentralIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}, return_channel chan<- BigMatrix) {
+
+    sample_max := setting.T * 3 + 4
+    self := setting.n-1
+    
+    // step a
+    r, err := SampleInt(setting.pk.N)
+    if err != nil {panic(err)}
+    random_root := NewBigMatrix(1, 2, []*big.Int{r, big.NewInt(1)})
+    root_poly = MultPoly(root_poly, random_root)
+    p_values := NewBigMatrix(1, sample_max, nil)
+
+    // step b
+    R, err := SampleMatrix(1, setting.T+1, setting.pk.N)
+    if err != nil {panic(err)}
+    R_tilde, err := SampleMatrix(1, setting.T+1, setting.pk.N)
+    if err != nil {panic(err)}
+    R_values := NewBigMatrix(1, sample_max, nil)
+    R_tilde_values := NewBigMatrix(1, sample_max, nil)
+    for i := 0; i < sample_max; i += 1 {
+        x := int64(i*2+1)
+        R_values.Set(0, i, EvalPoly(R, x, setting.pk.N))
+        R_tilde_values.Set(0, i, EvalPoly(R_tilde, x, setting.pk.N))
+        p_values.Set(0, i, EvalPoly(root_poly, x, setting.pk.N))
+    }
+
+    R_values_enc, err := EncryptMatrix(R_values, setting)
+    if err != nil {panic(err)}
+    all_R_values := make([]BigMatrix, setting.n)
+    all_R_values[self] = R_values_enc
+    for i := 0; i < self; i += 1 {
+        all_R_values[i] = (<-channels[i]).(BigMatrix)
+    }
+
+    // step c
+    var party_values BigMatrix
+    for i := 0; i < setting.n; i += 1 {
+        party_values = NewBigMatrix(1, sample_max, nil)
+        party_values, err = EncryptMatrix(party_values, setting)
+        if err != nil {panic(err)}
+        for j, vals := range all_R_values {
+            if i != j {
+                party_values, err = MatEncAdd(party_values, vals, setting.pk)
+                if err != nil {panic(err)}
+            }
+        }
+        if i != self {
+            channels[i] <- party_values
+        }
+    }
+
+    // step d
+    v := NewBigMatrix(1, sample_max, nil)
+    R_tilde_values_enc, err := EncryptMatrix(R_tilde_values, setting)
+    if err != nil {panic(err)}
+    all_masks, err := MatEncAdd(party_values, R_tilde_values_enc, setting.pk)
+    if err != nil {panic(err)}
+    for i := 0; i < sample_max; i += 1 {
+        val, _, err := setting.pk.Multiply(all_masks.At(0,i), p_values.At(0,i))
+        if err != nil {panic(err)}
+        v.Set(0, i, val)
+    }
+
+    // step e
+    for i := 0; i < self; i += 1 {
+        v, err = MatEncAdd(v, (<-channels[i]).(BigMatrix), setting.pk)
+        if err != nil {panic(err)}
+    }
+    for i := 0; i < self; i += 1 {
+        channels[i] <- v
+    }
+
+    // step f
+    partials := make([]PartialMatrix, setting.n)
+    pm, err := PartialDecryptMatrix(v, sk)
+    if err != nil {panic(err)}
+    partials[self] = pm
+    for i := 0; i < self; i += 1 {
+        partials[i] = (<-channels[i]).(PartialMatrix)
+    }
+
+    // step g
+    v, err = CombineMatrixShares(partials, setting)
+    if err != nil {panic(err)}
+    for i := 0; i < self; i += 1 {
+        channels[i] <- v
+    }
+
+    return_channel <- v
+}
+
+// step 3 of TPSI-diff
+func OuterIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}, return_channel chan<- BigMatrix) {
+    sample_max := setting.T * 3 + 4
+    
+    // step a
+    r, err := SampleInt(setting.pk.N)
+    if err != nil {panic(err)}
+    random_root := NewBigMatrix(1, 2, []*big.Int{r, big.NewInt(1)})
+    root_poly = MultPoly(root_poly, random_root)
+    p_values := NewBigMatrix(1, sample_max, nil)
+
+    // step b
+    R, err := SampleMatrix(1, setting.T+1, setting.pk.N)
+    if err != nil {panic(err)}
+    R_tilde, err := SampleMatrix(1, setting.T+1, setting.pk.N)
+    if err != nil {panic(err)}
+    R_values := NewBigMatrix(1, sample_max, nil)
+    R_tilde_values := NewBigMatrix(1, sample_max, nil)
+    for i := 0; i < sample_max; i += 1 {
+        x := int64(2*i+1)
+        R_values.Set(0, i, EvalPoly(R, x, setting.pk.N))
+        R_tilde_values.Set(0, i, EvalPoly(R_tilde, x, setting.pk.N))
+        p_values.Set(0, i, EvalPoly(root_poly, x, setting.pk.N))
+    }
+    
+    R_values_enc, err := EncryptMatrix(R_values, setting)
+    if err != nil {panic(err)}
+    channel <- R_values_enc
+
+    // step c
+    party_values := (<-channel).(BigMatrix)
+
+    // step d
+    v := NewBigMatrix(1, sample_max, nil)
+    R_tilde_values_enc, err := EncryptMatrix(R_tilde_values, setting)
+    if err != nil {panic(err)}
+    all_masks, err := MatEncAdd(party_values, R_tilde_values_enc, setting.pk)
+    if err != nil {panic(err)}
+    for i := 0; i < sample_max; i += 1 {
+        val, _, err := setting.pk.Multiply(all_masks.At(0,i), p_values.At(0,i))
+        if err != nil {panic(err)}
+        v.Set(0, i, val)
+    }
+    channel <- v
+    
+    // step e
+    v = (<-channel).(BigMatrix)
+    
+    // step f
+    pm, err := PartialDecryptMatrix(v, sk)
+    if err != nil {panic(err)}
+    channel <- pm
+
+    // step g
+    return_channel <- (<-channel).(BigMatrix)
+}
+
+func IntersectionWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, central bool, channels []chan interface{}, channel chan interface{}, return_channel chan []int64) {
+    root_poly := PolyFromRoots(items, setting.pk.N)
+    ret := make(chan BigMatrix)
+    if central {
+        go CentralIntersectionPolyWorker(root_poly, sk, setting, channels, ret)
+    } else {
+        go OuterIntersectionPolyWorker(root_poly, sk, setting, channel, ret)
+    }
+    vs := <-ret
+    ps := NewBigMatrix(1, setting.T * 3 + 4, nil)
+    for i := 0; i < ps.cols; i += 1 {
+        ps.Set(0, i, EvalPoly(root_poly, int64(2*i+1), setting.pk.N))
+    }
+    
+    p := Intersection(vs, ps, setting)
+    shared := make([]int64, 0, len(items))
+    unique := make([]int64, 0, len(items))
+    for _, item := range items {
+        if IsRoot(p, item, setting.pk.N) {
+            unique = append(unique, item)
+        } else {
+            shared = append(shared, item)
+        }
+    }
+
+    return_channel <- shared
+    return_channel <- unique
+
+}

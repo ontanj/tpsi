@@ -245,3 +245,129 @@ func SumMultiplication(values []*big.Int, setting Setting) (sum *big.Int, err er
     sum, err = setting.pk.Add(values...)
     return
 }
+
+// evaluate polynomial p at point x
+func EvalPoly(p BigMatrix, x int64, mod *big.Int) *big.Int {
+    sum := new(big.Int).Set(p.At(0,0))
+    xb := big.NewInt(x)
+    x_raised := new(big.Int).Set(xb)
+    term := new(big.Int)
+    for i := 1; ; i += 1 {
+        term.Mul(p.At(0,i), x_raised)
+        sum.Add(sum, term)
+        if i >= p.cols-1 {
+            break
+        }
+        x_raised.Mul(x_raised, xb)
+    }
+    return sum.Mod(sum, mod)
+}
+
+// polynomial multiplication
+func MultPoly(p1, p2 BigMatrix) BigMatrix {
+    l := p1.cols + p2.cols - 1
+    prod := make([]*big.Int, l)
+    for i := 0; i < l; i += 1 {
+        prod[i] = big.NewInt(0)
+    }
+    for i := 0; i < p1.cols; i += 1 {
+        for j := 0; j < p2.cols; j += 1 {
+            prod[i+j].Add(prod[i+j], new(big.Int).Mul(p1.At(0,i), p2.At(0,j)))
+        }
+    }
+    return NewBigMatrix(1, l, prod)
+}
+
+func PolyFromRoots(roots []int64, mod *big.Int) BigMatrix {
+    poly := NewBigMatrix(1,2,[]*big.Int{big.NewInt(-roots[0]), big.NewInt(1)})
+    for i := 1; i < len(roots); i += 1 {
+        root := NewBigMatrix(1, 2, []*big.Int{big.NewInt(-roots[i]), big.NewInt(1)})
+        poly = MultPoly(poly, root)
+    }
+    for _, val := range poly.values {
+        val.Mod(val, mod)
+    }
+    return poly
+}
+
+// step 4 of TPSI-diff
+func Intersection(vs, ps BigMatrix, setting Setting) BigMatrix {
+
+    sample_max := setting.T * 3 + 4
+    
+    // calculate q
+    q_vals := make([]*big.Int, vs.cols)
+    for i := range q_vals {
+        q_vals[i] = new(big.Int).ModInverse(ps.At(0,i), setting.pk.N)
+        q_vals[i].Mul(q_vals[i], vs.At(0,i))
+    }
+    q := NewBigMatrix(1, vs.cols, q_vals)
+    relations := make([]BigMatrix, sample_max)
+    x_pow := new(big.Int)
+    coeff := new(big.Int)
+    
+    coeff_pos := 0
+    for ; coeff_pos < sample_max; coeff_pos += 1 {
+        eq := NewBigMatrix(1, sample_max + 1, nil)
+        x := big.NewInt(int64(2*coeff_pos+1))
+        x_pow = big.NewInt(1)
+        
+        // populate rel_row with full equation
+        j := 0
+        for ; j <= setting.T * 2 + 2; j += 1 { // length of V(x)
+            coeff.Set(x_pow).Mod(coeff, setting.pk.N)
+            eq.At(0, j).Set(coeff)
+            x_pow.Mul(x_pow, x)
+        }
+        x_pow = big.NewInt(1)
+        for ; j <= sample_max; j += 1 { // length of p'(x)
+            coeff.Mul(q.At(0, coeff_pos), x_pow).Neg(coeff).Mod(coeff, setting.pk.N)
+            eq.At(0, j).Set(coeff)
+            x_pow.Mul(x_pow, x)
+        }
+
+        // substitue previous coefficents
+        for prev_coeff := 0; prev_coeff < coeff_pos; prev_coeff += 1 {
+            coeff = eq.At(0, prev_coeff)
+            crel := MatScaMul(relations[prev_coeff], coeff)
+            eq = MatAdd(eq, crel)
+            eq.Set(0, prev_coeff, big.NewInt(0))
+            eq = MatMod(eq, setting.pk.N)
+        }
+        
+        // if we get 0 = 0, we have all coefficients needed
+        if eq.At(0, coeff_pos).Cmp(big.NewInt(0)) == 0 {
+            break
+        }
+        
+        // collect current coefficient
+        rel_row := NewBigMatrix(1, sample_max + 1, nil)
+        coeff_inv := new(big.Int).ModInverse(eq.At(0, coeff_pos), setting.pk.N)
+        for rem_coeff := coeff_pos + 1; rem_coeff < sample_max + 1; rem_coeff += 1 {
+            rel := new(big.Int).Neg(eq.At(0, rem_coeff))
+            rel.Mul(rel, coeff_inv).Mod(rel, setting.pk.N)
+            rel_row.Set(0, rem_coeff, rel)
+        }
+        
+        relations[coeff_pos] = rel_row
+    }
+
+    interpolated_coeffs := make([]*big.Int, sample_max + 1)
+    interpolated_coeffs[coeff_pos] = big.NewInt(1)
+
+    // solve all coefficients from relations
+    for solving_coeff := coeff_pos - 1; solving_coeff >= 0; solving_coeff -= 1 {
+        coeff := big.NewInt(0)
+        for known_coeff := solving_coeff + 1; known_coeff <= coeff_pos; known_coeff += 1 {
+            coeff.Add(coeff, new(big.Int).Mul(relations[solving_coeff].At(0, known_coeff), interpolated_coeffs[known_coeff])).Mod(coeff, setting.pk.N)
+        }
+        interpolated_coeffs[solving_coeff] = coeff
+    }
+
+    den := interpolated_coeffs[setting.T * 2 + 3:coeff_pos + 1]
+    return NewBigMatrix(1, len(den), den)
+}
+
+func IsRoot(poly BigMatrix, x int64, mod *big.Int) bool {
+    return EvalPoly(poly, x, mod).Cmp(big.NewInt(0)) == 0
+}

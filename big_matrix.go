@@ -228,3 +228,11 @@ func CropMatrix(a BigMatrix, k int) BigMatrix {
     }
     return NewBigMatrix(a.rows, k, vals)
 }
+
+func MatMod(a BigMatrix, mod *big.Int) BigMatrix {
+    b := NewBigMatrix(a.rows, a.cols, nil)
+    for i := range a.values {
+        b.values[i].Mod(a.values[i], mod)
+    }
+    return b
+}
