@@ -855,6 +855,7 @@ func OuterIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, s
     return_channel <- (<-channel).(BigMatrix)
 }
 
+// returns two slices, shared elements & unique elements
 func IntersectionWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, central bool, channels []chan interface{}, channel chan interface{}, return_channel chan []int64) {
     root_poly := PolyFromRoots(items, setting.pk.N)
     ret := make(chan BigMatrix)
@@ -883,4 +884,21 @@ func IntersectionWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting,
     return_channel <- shared
     return_channel <- unique
 
+}
+
+// returns tow slices, shared elements & unique elements if cardinality test passes, otherwise a single nil
+func TPSIdiffWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, central bool, channels []chan interface{}, channel chan interface{}, return_channel chan []int64) {
+    ret := make(chan bool)
+    if central {
+        go CentralCardinalityTestWorker(items, sk, setting, channels, ret)
+    } else {
+        go OuterCardinalityTestWorker(items, sk, setting, channel, ret)
+    }
+
+    // exit if cardinality test doesn't pass
+    if !<-ret {
+        return_channel <- nil
+    } else {
+        go IntersectionWorker(items, sk, setting, central, channels, channel, return_channel)
+    }
 }

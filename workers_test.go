@@ -639,3 +639,70 @@ func TestIntersection(t *testing.T) {
         }
     }
 }
+
+func TestTPSIdiff(t *testing.T) {
+    var setting Setting
+    setting.n = 3
+    setting.m = 7
+    items := [][]int64{[]int64{2,4,6,8,10,12,14},
+                       []int64{2,4,6,8,10,16,18},
+                       []int64{2,4,6,8,12,20,22}}
+    sks, pk, err := GenerateKeys(512, 1, setting.n)
+    if err != nil {t.Error(err)}
+    setting.pk = pk
+    t.Run("pass cardinality test", func(t *testing.T) {
+    no_unique := 3
+    no_shared := 4
+        setting.T = 7
+        channels := create_chans(setting.n-1)
+        returns := make([]chan []int64, setting.n)
+        for i := 0; i < setting.n-1; i += 1 {
+            returns[i] = make(chan []int64)
+            go TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i], returns[i])
+        }
+        returns[setting.n-1] = make(chan []int64)
+        go TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil, returns[setting.n-1])
+        for i := 0; i < setting.n; i += 1 {
+            shared := <-returns[i]
+            if shared == nil {
+                t.Error("cardinality test failed")
+                continue
+            }
+            unique := <-returns[i]
+            if len(shared) != no_shared {
+                t.Errorf("wrong number of shared items, expected %d, got %d", no_shared, len(shared))
+            }
+            if len(unique) != no_unique {
+                t.Errorf("wrong number of unique items, expected %d, got %d", no_unique, len(unique))
+            }
+            for j := 0; j < no_shared; j += 1 {
+                if shared[j] != items[i][j] {
+                    t.Errorf("unexpected element in shared, expected %d, got %d", items[i][j], shared[j])
+                }
+            }
+            for j := 0; j < no_unique; j += 1 {
+                if unique[j] != items[i][j+no_shared] {
+                    t.Errorf("unexpected element in unique, expected %d, got %d", items[i][j+no_shared], unique[j])
+                }
+            }
+        }
+    })
+    t.Run("fail cardinality test", func(t *testing.T) {
+        setting.T = 6
+        channels := create_chans(setting.n-1)
+        returns := make([]chan []int64, setting.n)
+        for i := 0; i < setting.n-1; i += 1 {
+            returns[i] = make(chan []int64)
+            go TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i], returns[i])
+        }
+        returns[setting.n-1] = make(chan []int64)
+        go TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil, returns[setting.n-1])
+        for i := 0; i < setting.n; i += 1 {
+            shared := <-returns[i]
+            if shared != nil {
+                t.Error("cardinality test passed")
+                <-returns[i]
+            }
+        }
+    })
+}
