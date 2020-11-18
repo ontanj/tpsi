@@ -27,9 +27,13 @@ func TestASSWorkers(t *testing.T) {
     a, err := EncryptValue(big.NewInt(20), setting)
     if err != nil {t.Error(err)}
 
-    go CentralASSWorker(a, sks[setting.n-1], setting, channels, return_channel)
+    go func() {
+        return_channel <- CentralASSWorker(a, sks[setting.n-1], setting, channels)
+    }()
     for i := 0; i < setting.n-1; i += 1 {
-        go OuterASSWorker(a, sks[i], setting, channels[i], return_channel)
+        go func(i int) {
+            return_channel <- OuterASSWorker(a, sks[i], setting, channels[i])
+        }(i)
     }
 
     sum := big.NewInt(0)
@@ -57,9 +61,13 @@ func TestMultWorkers(t *testing.T) {
     b, err := EncryptValue(big.NewInt(4), setting)
     if err != nil {t.Error(err)}
 
-    go CentralMultWorker(a, b, sks[setting.n-1], setting, channels, return_channel)
+    go func() {
+        return_channel <- CentralMultWorker(a, b, sks[setting.n-1], setting, channels)
+    }()
     for i := 0; i < setting.n-1; i += 1 {
-        go OuterMultWorker(a, b, sks[i], setting, channels[i], return_channel)
+        go func(i int) {
+            return_channel <- OuterMultWorker(a, b, sks[i], setting, channels[i])
+        }(i)
     }
 
     for i := 0; i < setting.n; i += 1 {
@@ -94,9 +102,13 @@ func TestZeroTestWorkers(t *testing.T) {
         cipher, err := EncryptValue(big.NewInt(0), setting)
         if err != nil {panic(err)}
 
-        go CentralZeroTestWorker(cipher, sks[setting.n-1], setting, channels, return_channel)
+        go func() {
+            return_channel <- CentralZeroTestWorker(cipher, sks[setting.n-1], setting, channels)
+        }()
         for i := 0; i < setting.n-1; i += 1 {
-            go OuterZeroTestWorker(cipher, sks[i], setting, channels[i], return_channel)
+            go func(i int) {
+                return_channel <- OuterZeroTestWorker(cipher, sks[i], setting, channels[i])
+            }(i)
         }
 
         for i := 0; i < setting.n; i += 1 {
@@ -110,9 +122,13 @@ func TestZeroTestWorkers(t *testing.T) {
         cipher, err := EncryptValue(big.NewInt(131), setting)
         if err != nil {panic(err)}
 
-        go CentralZeroTestWorker(cipher, sks[setting.n-1], setting, channels, return_channel)
+        go func() {
+            return_channel <- CentralZeroTestWorker(cipher, sks[setting.n-1], setting, channels)
+        }()
         for i := 0; i < setting.n-1; i += 1 {
-            go OuterZeroTestWorker(cipher, sks[i], setting, channels[i], return_channel)
+            go func(i int) {
+                return_channel <- OuterZeroTestWorker(cipher, sks[i], setting, channels[i])
+            }(i)
         }
 
         for i := 0; i < setting.n; i += 1 {
@@ -136,9 +152,13 @@ func TestDecryptionWorkers(t *testing.T) {
     cipher, err := EncryptValue(big.NewInt(83), setting)
     if err != nil {panic(err)}
 
-    go CentralDecryptionWorker(cipher, sks[setting.n-1], setting, channels, return_channel)
+    go func() {
+        return_channel <- CentralDecryptionWorker(cipher, sks[setting.n-1], setting, channels)
+    }()
     for i := 0; i < setting.n-1; i += 1 {
-        go OuterDecryptionWorker(cipher, sks[i], setting, channels[i], return_channel)
+        go func(i int) {
+            return_channel <- OuterDecryptionWorker(cipher, sks[i], setting, channels[i])
+        }(i)
     }
 
     for i := 0; i < setting.n; i += 1 {
@@ -151,9 +171,13 @@ func TestDecryptionWorkers(t *testing.T) {
 func t_decrypt(cipher *big.Int, sks []*tcpaillier.KeyShare, setting Setting) *big.Int {
     channels := create_chans(setting.n-1)
     return_channel := make(chan *big.Int, 4) // only read first return value
-    go CentralDecryptionWorker(cipher, sks[setting.n-1], setting, channels, return_channel)
+    go func() {
+        return_channel <- CentralDecryptionWorker(cipher, sks[setting.n-1], setting, channels)
+    }()
     for i := 0; i < setting.n-1; i += 1 {
-        go OuterDecryptionWorker(cipher, sks[i], setting, channels[i], return_channel)
+        go func(i int) {
+            return_channel <- OuterDecryptionWorker(cipher, sks[i], setting, channels[i])
+        }(i)
     }
     val := <-return_channel
     return val
@@ -220,15 +244,23 @@ func TestPolynomialDivisionWorkers(t *testing.T) {
         }
     }
 
-    returns := make([]chan BigMatrix, setting.n)
-    returns[0] = make(chan BigMatrix)
-    returns[1] = make(chan BigMatrix) // discard these messages as they are equivalent to returns[0]
-    returns[2] = make(chan BigMatrix) // discard these messages as they are equivalent to returns[0]
-    returns[3] = make(chan BigMatrix)
+    returns := []chan BigMatrix{make(chan BigMatrix), make(chan BigMatrix, 4), make(chan BigMatrix, 4), make(chan BigMatrix)}
     
-    go PolynomialDivisionWorker(divid_enc, divis_enc, divid_den, divis_den, sks[setting.n-1], setting, channels, nil, returns[setting.n-1])
+    go func() {
+        qn, qd, rn, rd := PolynomialDivisionWorker(divid_enc, divis_enc, divid_den, divis_den, sks[setting.n-1], setting, channels, nil)
+        returns[setting.n-1] <- qn
+        returns[setting.n-1] <- qd
+        returns[setting.n-1] <- rn
+        returns[setting.n-1] <- NewBigMatrix(1, 1, []*big.Int{rd})
+    }()
     for i := 0; i < setting.n-1; i += 1 {
-        go PolynomialDivisionWorker(divid_enc, divis_enc, divid_den, divis_den, sks[i], setting, nil, channels[i], returns[i])
+        go func(i int) {
+            qn, qd, rn, rd := PolynomialDivisionWorker(divid_enc, divis_enc, divid_den, divis_den, sks[i], setting, nil, channels[i])
+            returns[i] <- qn
+            returns[i] <- qd
+            returns[i] <- rn
+            returns[i] <- NewBigMatrix(1, 1, []*big.Int{rd})
+        }(i)
     }
     
     qn := <-returns[0]
@@ -391,9 +423,17 @@ func TestMinPolyWorker(t *testing.T) {
         returns[i] = make(chan BigMatrix, 2)
     }
 
-    go MinPolyWorker(seq, rec_ord, sks[setting.n-1], setting, channels, nil, returns[setting.n-1])
+    go func() {
+        num, den := MinPolyWorker(seq, rec_ord, sks[setting.n-1], setting, channels, nil)
+        returns[setting.n-1] <- num
+        returns[setting.n-1] <- den
+    }()
     for i := 0; i < setting.n-1; i += 1 {
-        go MinPolyWorker(seq, rec_ord, sks[i], setting, nil, channels[i], returns[i])
+        go func(i int) {
+            num, den := MinPolyWorker(seq, rec_ord, sks[i], setting, nil, channels[i])
+            returns[i] <- num
+            returns[i] <- den
+        }(i)
     }
     for i := 0; i < 2; i += 1 {
         min_poly_num := <-returns[i]
@@ -439,9 +479,13 @@ func TestMatrixMultiplicationWorker(t *testing.T) {
     channels := create_chans(setting.n-1)
     return_channel := make(chan BigMatrix)
 
-    go CentralMatrixMultiplicationWorker(A, B, sks[setting.n-1], setting, channels, return_channel)
+    go func() {
+        return_channel <- CentralMatrixMultiplicationWorker(A, B, sks[setting.n-1], setting, channels)
+    }()
     for i := 0; i < setting.n-1; i += 1 {
-        go OuterMatrixMultiplicationWorker(A, B, sks[i], setting, channels[i], return_channel)
+        go func(i int) {
+            return_channel <- OuterMatrixMultiplicationWorker(A, B, sks[i], setting, channels[i])
+        }(i)
     }
 
     for i := 0; i < setting.n; i += 1 {
@@ -456,44 +500,58 @@ func TestSingularityTestWorker(t *testing.T) {
     sks, pk, err := GenerateKeys(512, 1, 4)
     if err != nil {t.Error(err)}
     setting.pk = pk
-    sing := NewBigMatrix(4, 4, sliceToBigInt([]int64{1, 2, 3, 5,
-                                                     4, 5, 6, 9,
-                                                     2, 4, 6, 10,
-                                                     7, 11, 15, 24}))
-    sing, err = EncryptMatrix(sing, setting)
-    if err != nil {t.Error(err)}
-    
-    non_sing := NewBigMatrix(4, 4, sliceToBigInt([]int64{1, 1, 0, 0,
-                                                         2, 0, 1, 2,
-                                                         0, 0, 1, 1,
-                                                         1, 0, 1, 1}))
-    non_sing, err = EncryptMatrix(non_sing, setting)
-    if err != nil {t.Error(err)}
 
-    channels := create_chans(setting.n-1)
-    return_channel := make(chan bool)
+    t.Run("singular matrix", func(t *testing.T) {
+        sing := NewBigMatrix(4, 4, sliceToBigInt([]int64{1, 2, 3, 5,
+                                                        4, 5, 6, 9,
+                                                        2, 4, 6, 10,
+                                                        7, 11, 15, 24}))
+        sing, err = EncryptMatrix(sing, setting)
+        if err != nil {t.Error(err)}
+        channels := create_chans(setting.n-1)
+        return_channel := make(chan bool)
 
-    go CentralSingularityTestWorker(sing, sks[setting.n-1], setting, channels, return_channel)
-    for i := 0; i < setting.n-1; i += 1 {
-        go OuterSingularityTestWorker(sing, sks[i], setting, channels[i], return_channel)
-    }
-
-    for i := 0; i < setting.n; i += 1 {
-        if !(<-return_channel) {
-            t.Error("should be singular")
+        go func() {
+            return_channel <- CentralSingularityTestWorker(sing, sks[setting.n-1], setting, channels)
+        }()
+        for i := 0; i < setting.n-1; i += 1 {
+            go func(i int) {
+                return_channel <- OuterSingularityTestWorker(sing, sks[i], setting, channels[i])
+            }(i)
         }
-    }
 
-    go CentralSingularityTestWorker(non_sing, sks[setting.n-1], setting, channels, return_channel)
-    for i := 0; i < setting.n-1; i += 1 {
-        go OuterSingularityTestWorker(non_sing, sks[i], setting, channels[i], return_channel)
-    }
-
-    for i := 0; i < setting.n; i += 1 {
-        if <-return_channel {
-            t.Error("should not be singular")
+        for i := 0; i < setting.n; i += 1 {
+            if !(<-return_channel) {
+                t.Error("should be singular")
+            }
         }
-    }
+    })
+
+    t.Run("non-singular matrix", func(t *testing.T) {
+        non_sing := NewBigMatrix(4, 4, sliceToBigInt([]int64{1, 1, 0, 0,
+            2, 0, 1, 2,
+            0, 0, 1, 1,
+            1, 0, 1, 1}))
+        non_sing, err = EncryptMatrix(non_sing, setting)
+        if err != nil {t.Error(err)}
+        channels := create_chans(setting.n-1)
+        return_channel := make(chan bool)
+
+        go func () {
+            return_channel <- CentralSingularityTestWorker(non_sing, sks[setting.n-1], setting, channels)
+        }()
+        for i := 0; i < setting.n-1; i += 1 {
+            go func(i int) {
+                return_channel <- OuterSingularityTestWorker(non_sing, sks[i], setting, channels[i])
+            }(i)
+        }
+
+        for i := 0; i < setting.n; i += 1 {
+            if <-return_channel {
+                t.Error("should not be singular")
+            }
+        }
+    })
 }
 
 func TestCardinalityTestWorker(t *testing.T) {
@@ -514,9 +572,13 @@ func TestCardinalityTestWorker(t *testing.T) {
         channels := create_chans(setting.n-1)
         return_channel := make(chan bool)
 
-        go CentralCardinalityTestWorker(all_items[setting.n-1], sks[setting.n-1], setting, channels, return_channel)
+        go func() {
+            return_channel <- CentralCardinalityTestWorker(all_items[setting.n-1], sks[setting.n-1], setting, channels)
+        }()
         for i := 0; i < setting.n-1; i += 1 {
-            go OuterCardinalityTestWorker(all_items[i], sks[i], setting, channels[i], return_channel)
+            go func(i int) {
+                return_channel <- OuterCardinalityTestWorker(all_items[i], sks[i], setting, channels[i])
+            }(i)
         }
 
         for i := 0; i < setting.n; i += 1 {
@@ -543,9 +605,13 @@ func TestCardinalityTestWorker(t *testing.T) {
         channels := create_chans(setting.n-1)
         return_channel := make(chan bool)
 
-        go CentralCardinalityTestWorker(all_items[setting.n-1], sks[setting.n-1], setting, channels, return_channel)
+        go func() {
+            return_channel <- CentralCardinalityTestWorker(all_items[setting.n-1], sks[setting.n-1], setting, channels)
+        }()
         for i := 0; i < setting.n-1; i += 1 {
-            go OuterCardinalityTestWorker(all_items[i], sks[i], setting, channels[i], return_channel)
+            go func(i int) {
+                return_channel <- OuterCardinalityTestWorker(all_items[i], sks[i], setting, channels[i])
+            }(i)
         }
 
         for i := 0; i < setting.n; i += 1 {
@@ -573,9 +639,13 @@ func TestIntersectionPoly(t *testing.T) {
     }
     channels := create_chans(setting.n)
     ret := make(chan BigMatrix)
-    go CentralIntersectionPolyWorker(roots[setting.n-1], sks[setting.n-1], setting, channels, ret)
+    go func() {
+        ret <- CentralIntersectionPolyWorker(roots[setting.n-1], sks[setting.n-1], setting, channels)
+    }()
     for i := 0; i < setting.n-1; i += 1 {
-        go OuterIntersectionPolyWorker(roots[i], sks[i], setting, channels[i], ret)
+        go func(i int) {
+            ret <- OuterIntersectionPolyWorker(roots[i], sks[i], setting, channels[i])
+        }(i)
     }
     for i := 0; i < setting.n; i += 1 {
         v := <-ret
@@ -611,10 +681,18 @@ func TestIntersection(t *testing.T) {
     return_channels := make([]chan []int64, setting.n)
     for i := 0; i < setting.n-1; i += 1 {
         return_channels[i] = make(chan []int64)
-        go IntersectionWorker(items[i], sks[i], setting, false, nil, channels[i], return_channels[i])
+        go func(i int) {
+            shared, unique := IntersectionWorker(items[i], sks[i], setting, false, nil, channels[i])
+            return_channels[i] <- shared
+            return_channels[i] <- unique
+        }(i)
     }
     return_channels[setting.n-1] = make(chan []int64)
-    go IntersectionWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil, return_channels[setting.n-1])
+    go func() {
+        shared, unique := IntersectionWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
+        return_channels[setting.n-1] <- shared
+        return_channels[setting.n-1] <- unique
+    }()
 
     for i := 0; i < setting.n; i += 1 {
         shared := <-return_channels[i]
@@ -651,17 +729,25 @@ func TestTPSIdiff(t *testing.T) {
     if err != nil {t.Error(err)}
     setting.pk = pk
     t.Run("pass cardinality test", func(t *testing.T) {
-    no_unique := 3
-    no_shared := 4
+        no_unique := 3
+        no_shared := 4
         setting.T = 7
         channels := create_chans(setting.n-1)
         returns := make([]chan []int64, setting.n)
         for i := 0; i < setting.n-1; i += 1 {
             returns[i] = make(chan []int64)
-            go TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i], returns[i])
+            go func(i int) {
+                sh, uq := TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i])
+                returns[i] <- sh
+                returns[i] <- uq
+            }(i)
         }
         returns[setting.n-1] = make(chan []int64)
-        go TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil, returns[setting.n-1])
+        go func() {
+            sh, uq := TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
+            returns[setting.n-1] <- sh
+            returns[setting.n-1] <- uq
+        }()
         for i := 0; i < setting.n; i += 1 {
             shared := <-returns[i]
             if shared == nil {
@@ -693,10 +779,18 @@ func TestTPSIdiff(t *testing.T) {
         returns := make([]chan []int64, setting.n)
         for i := 0; i < setting.n-1; i += 1 {
             returns[i] = make(chan []int64)
-            go TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i], returns[i])
+            go func(i int) {
+                sh, uq := TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i])
+                returns[i] <- sh
+                returns[i] <- uq
+            }(i)
         }
         returns[setting.n-1] = make(chan []int64)
-        go TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil, returns[setting.n-1])
+        go func() {
+            sh, uq := TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
+            returns[setting.n-1] <- sh
+            returns[setting.n-1] <- uq
+        }()
         for i := 0; i < setting.n; i += 1 {
             shared := <-returns[i]
             if shared != nil {

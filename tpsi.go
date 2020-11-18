@@ -371,3 +371,44 @@ func Intersection(vs, ps BigMatrix, setting Setting) BigMatrix {
 func IsRoot(poly BigMatrix, x int64, mod *big.Int) bool {
     return EvalPoly(poly, x, mod).Cmp(big.NewInt(0)) == 0
 }
+
+func RootMask(root_poly BigMatrix, setting Setting) (BigMatrix) {
+    r, err := SampleInt(setting.pk.N)
+    if err != nil {panic(err)}
+    random_root := NewBigMatrix(1, 2, []*big.Int{r, big.NewInt(1)})
+    root_poly = MultPoly(root_poly, random_root)
+    return root_poly
+}
+
+func EvalIntPolys(root_poly BigMatrix, sample_max int, setting Setting) (R_values_enc, R_tilde_values, p_values BigMatrix) {
+    R, err := SampleMatrix(1, setting.T+1, setting.pk.N)
+    if err != nil {panic(err)}
+    R_tilde, err := SampleMatrix(1, setting.T+1, setting.pk.N)
+    if err != nil {panic(err)}
+    R_values := NewBigMatrix(1, sample_max, nil)
+    R_tilde_values = NewBigMatrix(1, sample_max, nil)
+    p_values = NewBigMatrix(1, sample_max, nil)
+    for i := 0; i < sample_max; i += 1 {
+        x := int64(i*2+1)
+        R_values.Set(0, i, EvalPoly(R, x, setting.pk.N))
+        R_tilde_values.Set(0, i, EvalPoly(R_tilde, x, setting.pk.N))
+        p_values.Set(0, i, EvalPoly(root_poly, x, setting.pk.N))
+    }
+    R_values_enc, err = EncryptMatrix(R_values, setting)
+    if err != nil {panic(err)}
+    return
+}
+
+func MaskRootPoly(p_values, party_values, R_tilde_values BigMatrix, sample_max int, setting Setting) BigMatrix {
+    v := NewBigMatrix(1, sample_max, nil)
+    R_tilde_values_enc, err := EncryptMatrix(R_tilde_values, setting)
+    if err != nil {panic(err)}
+    all_masks, err := MatEncAdd(party_values, R_tilde_values_enc, setting.pk)
+    if err != nil {panic(err)}
+    for i := 0; i < sample_max; i += 1 {
+        val, _, err := setting.pk.Multiply(all_masks.At(0,i), p_values.At(0,i))
+        if err != nil {panic(err)}
+        v.Set(0, i, val)
+    }
+    return v
+}
