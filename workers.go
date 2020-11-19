@@ -765,7 +765,7 @@ func IntersectionWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting,
         vs, ps = OuterIntersectionPolyWorker(root_poly, sk, setting, channel)
     }
     
-    p := Intersection(vs, ps, setting)
+    p := Interpolation(vs, ps, setting)
     shared := make([]int64, 0, len(items))
     unique := make([]int64, 0, len(items))
     for _, item := range items {

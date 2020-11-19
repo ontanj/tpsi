@@ -316,7 +316,7 @@ func TestPolyFromRoots(t *testing.T) {
     }
 }
 
-func TestIntersectionFunc(t *testing.T) {
+func TestInterpolation(t *testing.T) {
     vs := NewBigMatrix(1, 7, sliceToBigInt([]int64{19, 6, 7, 12, 4, 5, 7}))//, 18, 16, 18}))
     ps := NewBigMatrix(1, 7, sliceToBigInt([]int64{22, 21, 5, 20, 20, 5, 21}))//, 22, 8, 2}))
     // v_corr := []*big.Int{21,6,12,2,1}
@@ -326,7 +326,7 @@ func TestIntersectionFunc(t *testing.T) {
     setting.pk = pk
     setting.pk.N = big.NewInt(23)
     setting.T = 1
-    p := Intersection(vs, ps, setting)
+    p := Interpolation(vs, ps, setting)
     if len(p_corr) != p.cols {
         t.Errorf("wrong degree on interpolated polynomial; expected %d, got %d", len(p_corr), p.cols)
     } else {

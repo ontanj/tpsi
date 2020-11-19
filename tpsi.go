@@ -291,7 +291,7 @@ func PolyFromRoots(roots []int64, mod *big.Int) BigMatrix {
 }
 
 // step 4 of TPSI-diff
-func Intersection(vs, ps BigMatrix, setting Setting) BigMatrix {
+func Interpolation(vs, ps BigMatrix, setting Setting) BigMatrix {
 
     sample_max := setting.T * 3 + 4
     
