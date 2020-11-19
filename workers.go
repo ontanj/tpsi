@@ -659,7 +659,7 @@ func OuterCardinalityTestWorker(items []int64, sk *tcpaillier.KeyShare, setting 
 }
 
 // step 3 of TPSI-diff
-func CentralIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) BigMatrix {
+func CentralIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) (BigMatrix, BigMatrix) {
     sample_max := setting.T * 3 + 4
     self := setting.n-1
     
@@ -720,11 +720,11 @@ func CentralIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare,
         channels[i] <- v
     }
 
-    return v
+    return v, p_values
 }
 
 // step 3 of TPSI-diff
-func OuterIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) BigMatrix {
+func OuterIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) (BigMatrix, BigMatrix) {
     sample_max := setting.T * 3 + 4
     
     // step a
@@ -750,21 +750,19 @@ func OuterIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, s
     channel <- pm
 
     // step g
-    return (<-channel).(BigMatrix)
+    v = (<-channel).(BigMatrix)
+    return v, p_values
 }
 
 // returns two slices, shared elements & unique elements
 func IntersectionWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]int64, []int64) {
     root_poly := PolyFromRoots(items, setting.pk.N)
     var vs BigMatrix
+    var ps BigMatrix
     if central {
-        vs = CentralIntersectionPolyWorker(root_poly, sk, setting, channels)
+        vs, ps = CentralIntersectionPolyWorker(root_poly, sk, setting, channels)
     } else {
-        vs = OuterIntersectionPolyWorker(root_poly, sk, setting, channel)
-    }
-    ps := NewBigMatrix(1, setting.T * 3 + 4, nil)
-    for i := 0; i < ps.cols; i += 1 {
-        ps.Set(0, i, EvalPoly(root_poly, int64(2*i+1), setting.pk.N))
+        vs, ps = OuterIntersectionPolyWorker(root_poly, sk, setting, channel)
     }
     
     p := Intersection(vs, ps, setting)

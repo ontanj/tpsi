@@ -640,11 +640,13 @@ func TestIntersectionPoly(t *testing.T) {
     channels := create_chans(setting.n)
     ret := make(chan BigMatrix)
     go func() {
-        ret <- CentralIntersectionPolyWorker(roots[setting.n-1], sks[setting.n-1], setting, channels)
+        vs, _ := CentralIntersectionPolyWorker(roots[setting.n-1], sks[setting.n-1], setting, channels)
+        ret <- vs
     }()
     for i := 0; i < setting.n-1; i += 1 {
         go func(i int) {
-            ret <- OuterIntersectionPolyWorker(roots[i], sks[i], setting, channels[i])
+            vs, _ := OuterIntersectionPolyWorker(roots[i], sks[i], setting, channels[i])
+            ret <- vs
         }(i)
     }
     for i := 0; i < setting.n; i += 1 {
