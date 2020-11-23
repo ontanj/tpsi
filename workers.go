@@ -2,11 +2,10 @@ package tpsi
 
 import (
     "math/big"
-    "github.com/niclabs/tcpaillier"
     "fmt"
 )
 
-func CentralASSWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) *big.Int {
+func CentralASSWorker(a *big.Int, sk secret_key, setting Setting, channels []chan interface{}) *big.Int {
     self := setting.n-1
 
     // step 1: sample d
@@ -29,18 +28,18 @@ func CentralASSWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, chan
     }
 
     // step 5: mask and decrypt
-    var e_partial *tcpaillier.DecryptionShare
+    var e_partial partial_decryption
     e_partial, err = SumMasksDecrypt(a, all_d, sk, setting)
     if err != nil {panic(err)}
     
     // receive e_parts
-    e_parts := make([]*tcpaillier.DecryptionShare, setting.n)
+    e_parts := make([]partial_decryption, setting.n)
     e_parts[self] = e_partial
     for i := 0; i < setting.n-1; i += 1 {
-        e_parts[i] = (<-channels[i]).(*tcpaillier.DecryptionShare)
+        e_parts[i] = (<-channels[i]).(partial_decryption)
     }
 
-    e, err := CombineShares(e_parts, setting)
+    e, err := setting.cs.CombinePartials(e_parts)
     if err != nil {
         panic(err)
     }
@@ -50,7 +49,7 @@ func CentralASSWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, chan
     return a_share
 }
 
-func OuterASSWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) *big.Int {
+func OuterASSWorker(a *big.Int, sk secret_key, setting Setting, channel chan interface{}) *big.Int {
     
     // step 1: sample d
     var d_plain *big.Int
@@ -65,7 +64,7 @@ func OuterASSWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, channe
     all_d = (<-channel).([]*big.Int)
     
     // step 5: mask and decrypt
-    var e_partial *tcpaillier.DecryptionShare
+    var e_partial partial_decryption
     e_partial, err = SumMasksDecrypt(a, all_d, sk, setting)
     if err != nil {panic(err)}
     
@@ -77,7 +76,7 @@ func OuterASSWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, channe
     return a_share
 }
 
-func CentralMultWorker(a, b *big.Int, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) *big.Int {
+func CentralMultWorker(a, b *big.Int, sk secret_key, setting Setting, channels []chan interface{}) *big.Int {
     self := setting.n-1
 
     a_share := CentralASSWorker(a, sk, setting, channels)
@@ -105,7 +104,7 @@ func CentralMultWorker(a, b *big.Int, sk *tcpaillier.KeyShare, setting Setting, 
     return sum
 }
 
-func OuterMultWorker(a, b *big.Int, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) *big.Int {
+func OuterMultWorker(a, b *big.Int, sk secret_key, setting Setting, channel chan interface{}) *big.Int {
     
     a_share := OuterASSWorker(a, sk, setting, channel)
     
@@ -126,49 +125,49 @@ func OuterMultWorker(a, b *big.Int, sk *tcpaillier.KeyShare, setting Setting, ch
     return sum
 }
 
-func CentralDecryptionWorker(cipher *big.Int, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) *big.Int {
+func CentralDecryptionWorker(cipher *big.Int, sk secret_key, setting Setting, channels []chan interface{}) *big.Int {
     self := setting.n-1
-    partial, err := PartialDecryptValue(cipher, sk)
+    partial, err := sk.PartialDecrypt(cipher)
     if err != nil {panic(err)}
 
-    ds := make([]*tcpaillier.DecryptionShare, setting.n)
+    ds := make([]partial_decryption, setting.n)
     ds[self] = partial
 
     for i := 0; i < self; i += 1 {
-        ds[i] = (<-channels[i]).(*tcpaillier.DecryptionShare)
+        ds[i] = (<-channels[i]).(partial_decryption)
     }
 
     for i := 0; i < self; i += 1 {
         channels[i] <- ds
     }
 
-    plain, err := CombineShares(ds, setting)
+    plain, err := setting.cs.CombinePartials(ds)
     if err != nil {panic(err)}
 
     return plain
 }
 
-func OuterDecryptionWorker(cipher *big.Int, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) *big.Int {
-    partial, err := PartialDecryptValue(cipher, sk)
+func OuterDecryptionWorker(cipher *big.Int, sk secret_key, setting Setting, channel chan interface{}) *big.Int {
+    partial, err := sk.PartialDecrypt(cipher)
     if err != nil {panic(err)}
 
     channel <- partial
 
-    ds := (<-channel).([]*tcpaillier.DecryptionShare)
+    ds := (<-channel).([]partial_decryption)
 
-    plain, err := CombineShares(ds, setting)
+    plain, err := setting.cs.CombinePartials(ds)
     if err != nil {panic(err)}
 
     return plain
 }
 
-func CentralZeroTestWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) bool {
+func CentralZeroTestWorker(a *big.Int, sk secret_key, setting Setting, channels []chan interface{}) bool {
     self := setting.n-1
     
-    mask, err := SampleInt(setting.pk.N)
+    mask, err := SampleInt(setting.cs.N())
     if err != nil {panic(err)}
 
-    mask, err = EncryptValue(mask, setting)
+    mask, err = setting.cs.Encrypt(mask)
     if err != nil {panic(err)}
     
     masks := make([]*big.Int, setting.n)
@@ -181,29 +180,29 @@ func CentralZeroTestWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting,
         channels[i] <- masks
     }
 
-    sum, err := setting.pk.Add(masks...)
+    sum, err := setting.cs.Add(masks...)
     if err != nil {panic(err)}
 
     pred := CentralMultWorker(a, sum, sk, setting, channels)
 
-    pred =  CentralDecryptionWorker(pred, sk, setting, channels)
+    pred = CentralDecryptionWorker(pred, sk, setting, channels)
 
     return pred.Cmp(big.NewInt(0)) == 0    
 }
 
-func OuterZeroTestWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) bool {
+func OuterZeroTestWorker(a *big.Int, sk secret_key, setting Setting, channel chan interface{}) bool {
 
-    mask, err := SampleInt(setting.pk.N)
+    mask, err := SampleInt(setting.cs.N())
     if err != nil {panic(err)}
 
-    mask, err = EncryptValue(mask, setting)
+    mask, err = setting.cs.Encrypt(mask)
     if err != nil {panic(err)}
 
     channel <- mask
 
     masks := (<-channel).([]*big.Int)
 
-    sum, err := setting.pk.Add(masks...)
+    sum, err := setting.cs.Add(masks...)
     if err != nil {panic(err)}
 
     pred := OuterMultWorker(a, sum, sk, setting, channel)
@@ -218,7 +217,7 @@ func OuterZeroTestWorker(a *big.Int, sk *tcpaillier.KeyShare, setting Setting, c
 //  * q denominator
 //  * r numerator
 //  * r denominator (slice of size 1 as all coefficents share denominator)
-func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}, channel chan interface{}) (BigMatrix, BigMatrix, BigMatrix, *big.Int) {
+func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (BigMatrix, BigMatrix, BigMatrix, *big.Int) {
     zeroTest := func (val *big.Int) bool {
         if channels != nil {
             return CentralZeroTestWorker(val, sk, setting, channels)
@@ -245,10 +244,12 @@ func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaill
             break
         }
     }
+    ql := 1+la-lb
+    randomizers := exchangeRandomizers(channels, channel, 2*ql, setting.cs.N())
     a_num := a
-    q_num, err := EncryptedFixedZeroMatrix(1, 1+la-lb, setting)
+    q_num, err := EncryptedFixedZeroMatrix(1, ql, randomizers[:ql], setting)
     if err != nil {panic(err)}
-    q_den, err := EncryptedFixedOneMatrix(1, 1+la-lb, setting)
+    q_den, err := EncryptedFixedOneMatrix(1, ql, randomizers[ql:], setting)
     if err != nil {panic(err)}
 
     for i := la; i >= lb; i -= 1 { // start at highest degree coefficient, go until dividend smaller than divisor
@@ -288,7 +289,8 @@ func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaill
         r_den := multiply(a_den, p_den)
 
         // subtract r2 = r1 - p
-        r_num = divSub(r_num, p_num, setting)
+        randomizers = exchangeRandomizers(channels, channel, p_num.cols, setting.cs.N())
+        r_num = divSub(r_num, p_num, randomizers, setting)
 
         a_num = r_num
         a_den = r_den
@@ -306,42 +308,68 @@ func PolynomialDivisionWorker(a, b BigMatrix, a_den, b_den *big.Int, sk *tcpaill
     return q_num, q_den, a_num, a_den
 }
 
-func divSub(r, p BigMatrix, setting Setting) BigMatrix {
+func exchangeRandomizers(channels []chan interface{}, channel chan interface{}, n int, q *big.Int) []*big.Int {
+    if channels != nil {
+        randomizer_matrix, err := SampleMatrix(1, n, q)
+        randomizers := randomizer_matrix.values
+        if err != nil {panic(err)}
+        for _, ch := range channels {
+            ch <- randomizers
+        }
+        return randomizers
+    } else {
+        return (<-channel).([]*big.Int)
+    }
+}
+
+// subtracts encrypted polynomials r - p, where deg(r) >= deg(p)
+func divSub(r, p BigMatrix, randomizers []*big.Int, setting Setting) BigMatrix {
     pos_diff := r.cols-p.cols
     for i := 0; i < p.cols; i += 1 {
-        neg, err := setting.pk.MultiplyFixed(p.At(0,i), big.NewInt(-1), big.NewInt(1))
+        neg, err := setting.cs.MultiplyScalarFixed(p.At(0,i), big.NewInt(-1), randomizers[i])
         if err != nil {panic(err)}
-        diff, err := setting.pk.Add(r.At(0, i+pos_diff), neg)
+        diff, err := setting.cs.Add(r.At(0, i+pos_diff), neg)
         if err != nil {panic(err)}
         r.Set(0, i+pos_diff, diff)
     }
     return r
 }
 
-func MinPolyWorker(seq BigMatrix, rec_ord int, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}, channel chan interface{}) (BigMatrix, BigMatrix) {
+func MinPolyWorker(seq BigMatrix, rec_ord int, sk secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (BigMatrix, BigMatrix) {
     // create r0
-    coeff, err := setting.pk.EncryptFixed(big.NewInt(1), big.NewInt(1))
-    a, err := EncryptedFixedZeroMatrix(1, seq.cols+1, setting)
+    randomizers := exchangeRandomizers(channels, channel, 8+seq.cols, setting.cs.N())
+    ri := 0
+    coeff, err := setting.cs.EncryptFixed(big.NewInt(1), randomizers[ri])
+    ri += 1
+    al := seq.cols + 1
+    a, err := EncryptedFixedZeroMatrix(1, al, randomizers[ri:ri+al], setting)
     if err != nil {panic(err)}
+    ri += al
     a.Set(0, seq.cols, coeff)
 
-    a_den, err := setting.pk.EncryptFixed(big.NewInt(1), big.NewInt(1))
+    a_den, err := setting.cs.EncryptFixed(big.NewInt(1), randomizers[ri])
     if err != nil {panic(err)}
+    ri += 1
 
     // create r1
     b := seq
-    b_den, err := setting.pk.EncryptFixed(big.NewInt(1), big.NewInt(1))
+    b_den, err := setting.cs.EncryptFixed(big.NewInt(1), randomizers[ri])
     if err != nil {panic(err)}
+    ri += 1
     
     // create t0, t1
-    t0_num, err := EncryptedFixedZeroMatrix(1, 1, setting)
+    t0_num, err := EncryptedFixedZeroMatrix(1, 1, randomizers[ri:ri+1], setting)
     if err != nil {panic(err)}
-    t0_den, err := EncryptedFixedOneMatrix(1, 1, setting)
+    ri += 1
+    t0_den, err := EncryptedFixedOneMatrix(1, 1, randomizers[ri:ri+1], setting)
     if err != nil {panic(err)}
-    t1_num, err := EncryptedFixedOneMatrix(1, 1, setting)
+    ri += 1
+    t1_num, err := EncryptedFixedOneMatrix(1, 1, randomizers[ri:ri+1], setting)
     if err != nil {panic(err)}
-    t1_den, err := EncryptedFixedOneMatrix(1, 1, setting)
+    ri += 1
+    t1_den, err := EncryptedFixedOneMatrix(1, 1, randomizers[ri:ri+1], setting)
     if err != nil {panic(err)}
+    ri += 1
     
     var t2_num BigMatrix
     var t2_den BigMatrix
@@ -365,14 +393,14 @@ func MinPolyWorker(seq BigMatrix, rec_ord int, sk *tcpaillier.KeyShare, setting 
     return t2_num, t2_den
 }
 
-func nextT(t0_num, t0_den, t1_num, t1_den, q_num, q_den BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}, channel chan interface{}) (t2_num, t2_den BigMatrix, err error) {
+func nextT(t0_num, t0_den, t1_num, t1_den, q_num, q_den BigMatrix, sk secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (t2_num, t2_den BigMatrix, err error) {
     p_num, p_den, err := PolyMult(t1_num, t1_den, q_num, q_den, sk, setting, channels, channel)
     if err != nil {return}
     t2_num, t2_den, err = PolySub(t0_num, t0_den, p_num, p_den, sk, setting, channels, channel)
     return
 }
 
-func PolySub(a_num, a_den, b_num, b_den BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}, channel chan interface{}) (diff_num, diff_den BigMatrix, err error) {
+func PolySub(a_num, a_den, b_num, b_den BigMatrix, sk secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (diff_num, diff_den BigMatrix, err error) {
     if a_num.cols != a_den.cols || b_num.cols != b_den.cols {
         panic("mismatched length of denominator")
     }
@@ -393,21 +421,22 @@ func PolySub(a_num, a_den, b_num, b_den BigMatrix, sk *tcpaillier.KeyShare, sett
     }
     var num *big.Int
     var neg *big.Int
+    randomizers := exchangeRandomizers(channels, channel, diff_l, setting.cs.N())
     for i := 0; i < diff_l; i += 1 {
         if i >= b_num.cols {
             diff_num.Set(0, i, a_num.At(0, i))
             diff_den.Set(0, i, a_den.At(0, i))
         } else if i >= a_num.cols {
-            num, err = setting.pk.MultiplyFixed(b_num.At(0, i), big.NewInt(-1), big.NewInt(1))
+            num, err = setting.cs.MultiplyScalarFixed(b_num.At(0, i), big.NewInt(-1), randomizers[i])
             if err != nil {return}
             diff_num.Set(0, i, num)
             diff_den.Set(0, i, b_den.At(0, i))
         } else {
             long_a_num := multiply(a_num.At(0, i), b_den.At(0, i))
             long_b_num := multiply(b_num.At(0, i), a_den.At(0, i))
-            neg, err = setting.pk.MultiplyFixed(long_b_num, big.NewInt(-1), big.NewInt(1))
+            neg, err = setting.cs.MultiplyScalarFixed(long_b_num, big.NewInt(-1), randomizers[i])
             if err != nil {return}
-            num, err = setting.pk.Add(long_a_num, neg)
+            num, err = setting.cs.Add(long_a_num, neg)
             if err != nil {return}
             diff_num.Set(0, i, num)
             den := multiply(a_den.At(0, i), b_den.At(0, i))
@@ -417,10 +446,12 @@ func PolySub(a_num, a_den, b_num, b_den BigMatrix, sk *tcpaillier.KeyShare, sett
     return
 }
 
-func PolyMult(a_num, a_den, b_num, b_den BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}, channel chan interface{}) (prod_num, prod_den BigMatrix, err error) {
-    prod_num, err = EncryptedFixedZeroMatrix(1, a_num.cols+b_num.cols-1, setting)
+func PolyMult(a_num, a_den, b_num, b_den BigMatrix, sk secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (prod_num, prod_den BigMatrix, err error) {
+    prod_len := a_num.cols+b_num.cols-1
+    randomizers := exchangeRandomizers(channels, channel, prod_len*2, setting.cs.N())
+    prod_num, err = EncryptedFixedZeroMatrix(1, prod_len, randomizers[:prod_len], setting)
     if err != nil {return}
-    prod_den, err = EncryptedFixedOneMatrix(1, prod_num.cols, setting)
+    prod_den, err = EncryptedFixedOneMatrix(1, prod_num.cols, randomizers[prod_len:], setting)
     if err != nil {return}
     multiply := func (a, b *big.Int) *big.Int {
         if channels != nil {
@@ -440,7 +471,7 @@ func PolyMult(a_num, a_den, b_num, b_den BigMatrix, sk *tcpaillier.KeyShare, set
             
             long_num := multiply(num, current_den)
             long_current_num := multiply(current_num, den)
-            new_num, err = setting.pk.Add(long_num, long_current_num)
+            new_num, err = setting.cs.Add(long_num, long_current_num)
             if err != nil {return}
             prod_num.Set(0, i+j, new_num)
             
@@ -451,29 +482,29 @@ func PolyMult(a_num, a_den, b_num, b_den BigMatrix, sk *tcpaillier.KeyShare, set
     return
 }
 
-func EncryptedFixedZeroMatrix(rows, cols int, setting Setting) (m BigMatrix, err error) {
+func EncryptedFixedZeroMatrix(rows, cols int, randomizers []*big.Int, setting Setting) (m BigMatrix, err error) {
     var val *big.Int
     m = NewBigMatrix(rows, cols, nil)
     for i := range m.values {
-        val, err = setting.pk.EncryptFixed(big.NewInt(0), big.NewInt(1))
+        val, err = setting.cs.EncryptFixed(big.NewInt(0), randomizers[i])
         m.values[i] = val
         if err != nil {return}
     }
     return
 }
 
-func EncryptedFixedOneMatrix(rows, cols int, setting Setting) (m BigMatrix, err error) {
+func EncryptedFixedOneMatrix(rows, cols int, randomizers []*big.Int, setting Setting) (m BigMatrix, err error) {
     var val *big.Int
     m = NewBigMatrix(rows, cols, nil)
     for i := range m.values {
-        val, err = setting.pk.EncryptFixed(big.NewInt(1), big.NewInt(1))
+        val, err = setting.cs.EncryptFixed(big.NewInt(1), randomizers[i])
         m.values[i] = val
         if err != nil {return}
     }
     return
 }
 
-func CentralMatrixMultiplicationWorker(a, b BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) BigMatrix {
+func CentralMatrixMultiplicationWorker(a, b BigMatrix, sk secret_key, setting Setting, channels []chan interface{}) BigMatrix {
     if a.cols != b.rows {
         panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", a.rows, a.cols, b.rows, b.cols))
     }
@@ -525,7 +556,7 @@ func CentralMatrixMultiplicationWorker(a, b BigMatrix, sk *tcpaillier.KeyShare, 
 
 }
 
-func OuterMatrixMultiplicationWorker(a, b BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) BigMatrix {
+func OuterMatrixMultiplicationWorker(a, b BigMatrix, sk secret_key, setting Setting, channel chan interface{}) BigMatrix {
     if a.cols != b.rows {
         panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", a.rows, a.cols, b.rows, b.cols))
     }
@@ -555,7 +586,7 @@ func OuterMatrixMultiplicationWorker(a, b BigMatrix, sk *tcpaillier.KeyShare, se
 }
 
 // outputs true through return_channel if m is singular
-func CentralSingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) bool {
+func CentralSingularityTestWorker(m BigMatrix, sk secret_key, setting Setting, channels []chan interface{}) bool {
     self := setting.n-1
     // step b
     v, err := SampleVVector(m, setting)
@@ -596,7 +627,7 @@ func CentralSingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting 
 }
 
 // outputs true through return_channel if m is singular
-func OuterSingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) bool {
+func OuterSingularityTestWorker(m BigMatrix, sk secret_key, setting Setting, channel chan interface{}) bool {
     // step b
     v := (<-channel).(BigMatrix)
 
@@ -626,18 +657,18 @@ func OuterSingularityTestWorker(m BigMatrix, sk *tcpaillier.KeyShare, setting Se
 
 
 // returns true if number of elements not shared by all is <= setting.T
-func CentralCardinalityTestWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) bool {
+func CentralCardinalityTestWorker(items []int64, sk secret_key, setting Setting, channels []chan interface{}) bool {
     self := setting.n-1
-    u, err := SampleInt(setting.pk.N)
+    u, err := SampleInt(setting.cs.N())
     if err != nil {panic(err)}
     for i := 0; i < self; i += 1 {
         channels[i] <- u
     }
-    H, err := CPComputeHankelMatrix(items, u, setting.pk.N, setting)
+    H, err := CPComputeHankelMatrix(items, u, setting.cs.N(), setting)
     if err != nil {panic(err)}
     for i := 0; i < self; i += 1 {
         Hi := (<-channels[i]).(BigMatrix)
-        H, err = MatEncSub(H, Hi, setting.pk)
+        H, err = MatEncSub(H, Hi, setting.cs)
         if err != nil {panic(err)}
     }
     for i := 0; i < self; i += 1 {
@@ -648,7 +679,7 @@ func CentralCardinalityTestWorker(items []int64, sk *tcpaillier.KeyShare, settin
 }
 
 // returns true if number of elements not shared by all is <= setting.T
-func OuterCardinalityTestWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) bool {
+func OuterCardinalityTestWorker(items []int64, sk secret_key, setting Setting, channel chan interface{}) bool {
     u := (<-channel).(*big.Int)
     H1, err := ComputeHankelMatrix(items, u, setting)
     if err != nil {panic(err)}
@@ -659,7 +690,7 @@ func OuterCardinalityTestWorker(items []int64, sk *tcpaillier.KeyShare, setting 
 }
 
 // step 3 of TPSI-diff
-func CentralIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channels []chan interface{}) (BigMatrix, BigMatrix) {
+func CentralIntersectionPolyWorker(root_poly BigMatrix, sk secret_key, setting Setting, channels []chan interface{}) (BigMatrix, BigMatrix) {
     sample_max := setting.T * 3 + 4
     self := setting.n-1
     
@@ -683,7 +714,7 @@ func CentralIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare,
         if err != nil {panic(err)}
         for j, vals := range all_R_values {
             if i != j {
-                party_values, err = MatEncAdd(party_values, vals, setting.pk)
+                party_values, err = MatEncAdd(party_values, vals, setting.cs)
                 if err != nil {panic(err)}
             }
         }
@@ -697,7 +728,7 @@ func CentralIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare,
 
     // step e
     for i := 0; i < self; i += 1 {
-        v, err = MatEncAdd(v, (<-channels[i]).(BigMatrix), setting.pk)
+        v, err = MatEncAdd(v, (<-channels[i]).(BigMatrix), setting.cs)
         if err != nil {panic(err)}
     }
     for i := 0; i < self; i += 1 {
@@ -724,7 +755,7 @@ func CentralIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare,
 }
 
 // step 3 of TPSI-diff
-func OuterIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, setting Setting, channel chan interface{}) (BigMatrix, BigMatrix) {
+func OuterIntersectionPolyWorker(root_poly BigMatrix, sk secret_key, setting Setting, channel chan interface{}) (BigMatrix, BigMatrix) {
     sample_max := setting.T * 3 + 4
     
     // step a
@@ -755,8 +786,8 @@ func OuterIntersectionPolyWorker(root_poly BigMatrix, sk *tcpaillier.KeyShare, s
 }
 
 // returns two slices, shared elements & unique elements
-func IntersectionWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]int64, []int64) {
-    root_poly := PolyFromRoots(items, setting.pk.N)
+func IntersectionWorker(items []int64, sk secret_key, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]int64, []int64) {
+    root_poly := PolyFromRoots(items, setting.cs.N())
     var vs BigMatrix
     var ps BigMatrix
     if central {
@@ -769,7 +800,7 @@ func IntersectionWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting,
     shared := make([]int64, 0, len(items))
     unique := make([]int64, 0, len(items))
     for _, item := range items {
-        if IsRoot(p, item, setting.pk.N) {
+        if IsRoot(p, item, setting.cs.N()) {
             unique = append(unique, item)
         } else {
             shared = append(shared, item)
@@ -780,7 +811,7 @@ func IntersectionWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting,
 }
 
 // returns two slices: shared elements & unique elements if cardinality test passes, otherwise nil, nil
-func TPSIdiffWorker(items []int64, sk *tcpaillier.KeyShare, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]int64, []int64) {
+func TPSIdiffWorker(items []int64, sk secret_key, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]int64, []int64) {
     var pred bool
     if central {
         pred = CentralCardinalityTestWorker(items, sk, setting, channels)

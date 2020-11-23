@@ -3,7 +3,6 @@ package tpsi
 import (
     "testing"
     "math/big"
-    "github.com/niclabs/tcpaillier"
 )
 
 func TestHankelMatrix(t *testing.T) {
@@ -12,9 +11,9 @@ func TestHankelMatrix(t *testing.T) {
     setting.m = 3
     setting.T = 2
     setting.n = 4
-    _, pk, err := GenerateKeys(512, 1, setting.n)
+    pk, _, err := NewDJCryptosystem(512, setting.n)
     if err != nil {t.Error(err)}
-    setting.pk = pk
+    setting.cs = pk
     q := big.NewInt(11)
     u := big.NewInt(6)
     H := ComputePlainHankelMatrix(items, u, q, setting)
@@ -36,19 +35,19 @@ func TestHankelMatrix(t *testing.T) {
 }
 
 func TestEncryptValue(t *testing.T) {
-    sks, pk, error := GenerateKeys(512, 1, 4)
+    pk, sks, error := NewDJCryptosystem(512, 4)
     if error != nil {
         t.Errorf("%v", error)
         return
     }
     var setting Setting
-    setting.pk = pk
+    setting.cs = pk
     plaintext := big.NewInt(32)
-    ciphertext, err := EncryptValue(plaintext, setting)
+    ciphertext, err := setting.cs.Encrypt(plaintext)
     if err != nil {
         t.Errorf("%v", err)
     }
-    decryptShares := make([]*tcpaillier.DecryptionShare, 4)
+    decryptShares := make([]partial_decryption, 4)
     for i, sk := range sks {
         dks, err := PartialDecryptValue(ciphertext, sk)
         if err != nil {
@@ -56,7 +55,7 @@ func TestEncryptValue(t *testing.T) {
         }
         decryptShares[i] = dks
     }
-    dec_plaintext, err := CombineShares(decryptShares, setting)
+    dec_plaintext, err := setting.cs.CombinePartials(decryptShares)
     if err != nil {
         t.Errorf("%v", err)
     }
@@ -70,8 +69,9 @@ func TestEncryptValue(t *testing.T) {
 
 func TestEncryptMatrix(t *testing.T) {
     var setting Setting
-    sks, pk, err := GenerateKeys(512, 1, 4)
-    setting.pk = pk
+    pk, djsks, err := NewDJCryptosystem(512, 4)
+    sks := ConvertDJSKSlice(djsks)
+    setting.cs = pk
     if err != nil {
         t.Errorf("%v", err)
         return
@@ -89,8 +89,8 @@ func TestEncryptMatrix(t *testing.T) {
 
 func TestDecryptMatrix(t *testing.T) {
     var setting Setting
-    sks, pk, err := GenerateKeys(512, 1, 4)
-    setting.pk = pk
+    pk, sks, err := NewDJCryptosystem(512, 4)
+    setting.cs = pk
     if err != nil {
         t.Errorf("%v", err)
         return
@@ -121,18 +121,18 @@ func TestDecryptMatrix(t *testing.T) {
 }
 
 // checks if encrypted matrix a is equal to unencrypted matrix b, returns error otherwise
-func CompareEnc(enc, plain BigMatrix, sks []*tcpaillier.KeyShare, setting Setting, t *testing.T) {
+func CompareEnc(enc, plain BigMatrix, sks []secret_key, setting Setting, t *testing.T) {
     for i := 0; i < enc.rows; i += 1 {
         for j := 0; j < enc.cols; j += 1 {
-            decryptShares := make([]*tcpaillier.DecryptionShare, len(sks))
+            decryptShares := make([]partial_decryption, len(sks))
             for k, sk := range sks {
-                dks, err := PartialDecryptValue(enc.At(i, j), sk)
+                dks, err := sk.PartialDecrypt(enc.At(i, j))
                 if err != nil {
                     t.Error(err)
                 }
                 decryptShares[k] = dks
             }
-            dec_plaintext, err := CombineShares(decryptShares, setting)
+            dec_plaintext, err := setting.cs.CombinePartials(decryptShares)
             if err != nil {
                 t.Error(err)
             }
@@ -149,8 +149,9 @@ func TestMMult(t *testing.T) {
     AB_corr := MatMul(A, B)
     var setting Setting
     setting.n = 4
-    sks, pk, _ := GenerateKeys(512, 1, setting.n)
-    setting.pk = pk
+    pk, djsks, _ := NewDJCryptosystem(512, setting.n)
+    sks := ConvertDJSKSlice(djsks)
+    setting.cs = pk
     A, _ = EncryptMatrix(A, setting)
     B, _ = EncryptMatrix(B, setting)
 
@@ -194,13 +195,13 @@ func TestMPC(t *testing.T) {
     a_plain := big.NewInt(13)
     var setting Setting
     setting.n = 4
-    sks, pk, err := GenerateKeys(512, 1, setting.n)
+    pk, sks, err := NewDJCryptosystem(512, setting.n)
     if err != nil {
         t.Error(err)
         return
     }
-    setting.pk = pk
-    a, _ := EncryptValue(a_plain, setting)
+    setting.cs = pk
+    a, _ := setting.cs.Encrypt(a_plain)
 
     // step 1: sample d
     d_plain := make([]*big.Int, setting.n)
@@ -213,13 +214,13 @@ func TestMPC(t *testing.T) {
     }
 
     // step 5: mask and decrypt
-    e_parts := make([]*tcpaillier.DecryptionShare, setting.n)
+    e_parts := make([]partial_decryption, setting.n)
     for i := range d_enc {
         e_partial, err := SumMasksDecrypt(a, d_enc, sks[i], setting)
         if err != nil {t.Error(err)}
         e_parts[i] = e_partial
     }
-    e, err := CombineShares(e_parts, setting)
+    e, err := setting.cs.CombinePartials(e_parts)
     if err != nil {
         t.Error(err)
     }
@@ -235,14 +236,14 @@ func TestMPC(t *testing.T) {
         for _, val := range as {
             a_plain.Sub(a_plain, val)
         }
-        a_plain.Mod(a_plain, setting.pk.N)
+        a_plain.Mod(a_plain, setting.cs.N())
         if a_plain.Cmp(big.NewInt(0)) != 0 {
             t.Error("shares don't add up")
         }
     })
 
     t.Run("test Mult", func (t *testing.T) {
-        b, err := EncryptValue(big.NewInt(7), setting)
+        b, err := setting.cs.Encrypt(big.NewInt(7))
         if err != nil {t.Error(err)}
 
         // step 2: partial multiplication
@@ -258,14 +259,14 @@ func TestMPC(t *testing.T) {
         if err != nil {t.Error(err)}
         
         // verify
-        parts := make([]*tcpaillier.DecryptionShare, setting.n)
+        parts := make([]partial_decryption, setting.n)
         for i, sk := range sks {
             part, err := PartialDecryptValue(sum, sk)
             if err != nil {t.Error(err)}
             parts[i] = part
         }
-        ab, err := CombineShares(parts, setting)
-        ab.Mod(ab, setting.pk.N)
+        ab, err := setting.cs.CombinePartials(parts)
+        ab.Mod(ab, setting.cs.N())
         if err != nil {t.Error(err)}
         if ab.Cmp(big.NewInt(91)) != 0 {
             t.Error("multiplication error")
@@ -322,9 +323,9 @@ func TestInterpolation(t *testing.T) {
     // v_corr := []*big.Int{21,6,12,2,1}
     p_corr := sliceToBigInt([]int64{14,7,1})
     var setting Setting
-    _, pk, _ := GenerateKeys(512, 1, 4)
-    setting.pk = pk
-    setting.pk.N = big.NewInt(23)
+    pk, _, _ := NewDJCryptosystem(512, 4)
+    pk.PubKey.N = big.NewInt(23)
+    setting.cs = pk
     setting.T = 1
     p := Interpolation(vs, ps, setting)
     if len(p_corr) != p.cols {

@@ -190,12 +190,13 @@ func TestEncryptedMatrixAddition(t *testing.T) {
     a := NewBigMatrix(2, 3, sliceToBigInt([]int64{3, 4, 2, 1, 8, 5}))
     b := NewBigMatrix(2, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6}))
     c := NewBigMatrix(2, 3, sliceToBigInt([]int64{4, 6, 5, 5, 13, 11}))
-    sks, pk, err := GenerateKeys(512, 1, 4)
+    cs, djsks, err := NewDJCryptosystem(512, 4)
+    sks := ConvertDJSKSlice(djsks)
     if err != nil {
         t.Error(err)
     }
     var setting Setting;
-    setting.pk = pk
+    setting.cs = cs
     a, err = EncryptMatrix(a, setting)
     if err != nil {
         t.Error(err)
@@ -205,7 +206,7 @@ func TestEncryptedMatrixAddition(t *testing.T) {
         t.Error(err)
     }
     t.Run("vanilla", func(t *testing.T) {
-        sum, err := MatEncAdd(a, b, setting.pk)
+        sum, err := MatEncAdd(a, b, setting.cs)
         if err != nil {
             t.Error(err)
         }
@@ -222,7 +223,7 @@ func TestEncryptedMatrixAddition(t *testing.T) {
                 t.Error("didn't panic")
             }
         }()
-        MatEncSub(a, d, setting.pk)
+        MatEncSub(a, d, setting.cs)
     })
     t.Run("column mismatch", func(t *testing.T) {
         d := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6, 7, 8, 9}))
@@ -232,7 +233,7 @@ func TestEncryptedMatrixAddition(t *testing.T) {
                 t.Error("didn't panic")
             }
         }()
-        MatEncSub(a, d, setting.pk)
+        MatEncSub(a, d, setting.cs)
     })
 }
 
@@ -240,12 +241,13 @@ func TestEncryptedMatrixSubtraction(t *testing.T) {
     a := NewBigMatrix(2, 3, sliceToBigInt([]int64{3, 4, 2, 1, 8, 5}))
     b := NewBigMatrix(2, 3, sliceToBigInt([]int64{1, 2, 2, 0, 4, 3}))
     c := NewBigMatrix(2, 3, sliceToBigInt([]int64{2, 2, 0, 1, 4, 2}))
-    sks, pk, err := GenerateKeys(512, 1, 4)
+    pk, djsks, err := NewDJCryptosystem(512, 4)
+    sks := ConvertDJSKSlice(djsks)
     if err != nil {
         t.Error(err)
     }
     var setting Setting;
-    setting.pk = pk
+    setting.cs = pk
     a, err = EncryptMatrix(a, setting)
     if err != nil {
         t.Error(err)
@@ -255,7 +257,7 @@ func TestEncryptedMatrixSubtraction(t *testing.T) {
         t.Error(err)
     }
     t.Run("vanilla", func(t *testing.T) {
-        diff, err := MatEncSub(a, b, setting.pk)
+        diff, err := MatEncSub(a, b, setting.cs)
         if err != nil {
             t.Error(err)
         }
@@ -272,7 +274,7 @@ func TestEncryptedMatrixSubtraction(t *testing.T) {
                 t.Error("didn't panic")
             }
         }()
-        MatEncSub(a, d, setting.pk)
+        MatEncSub(a, d, setting.cs)
     })
     t.Run("column mismatch", func(t *testing.T) {
         d := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6, 7, 8, 9}))
@@ -282,19 +284,20 @@ func TestEncryptedMatrixSubtraction(t *testing.T) {
                 t.Error("didn't panic")
             }
         }()
-        MatEncSub(a, d, setting.pk)
+        MatEncSub(a, d, setting.cs)
     })
 }
 
 func TestEncryptedMatrixMultiplication(t *testing.T) {
     a := NewBigMatrix(2, 3, sliceToBigInt([]int64{1,2,3,4,5,6}))
     b := NewBigMatrix(3, 2, sliceToBigInt([]int64{1,2,3,4,5,6}))
-    sks, pk, _ := GenerateKeys(512, 1, 4)
+    cs, djsks, _ := NewDJCryptosystem(512, 4)
+    sks := ConvertDJSKSlice(djsks)
     var setting Setting
-    setting.pk = pk
+    setting.cs = cs
     ae, _ := EncryptMatrix(a, setting)
     t.Run("plaintext from right", func(t *testing.T) {  
-        abe, err := MatEncRightMul(ae, b, setting.pk)
+        abe, err := MatEncRightMul(ae, b, setting.cs)
         if err != nil {
             t.Error(err)
         }
@@ -305,7 +308,7 @@ func TestEncryptedMatrixMultiplication(t *testing.T) {
         }
     })
     t.Run("plaintext from left", func(t *testing.T) {  
-        bae, err := MatEncLeftMul(b, ae, setting.pk)
+        bae, err := MatEncLeftMul(b, ae, setting.cs)
         if err != nil {
             t.Error(err)
         }

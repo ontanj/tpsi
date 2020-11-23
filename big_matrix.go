@@ -4,7 +4,6 @@ import (
     "math/big"
     "errors"
     "fmt"
-    "github.com/niclabs/tcpaillier"
 )
 
 type BigMatrix struct {
@@ -105,7 +104,7 @@ func MatScaMul(a BigMatrix, b *big.Int) BigMatrix {
 }
 
 // matrix addition for encrypted matrices
-func MatEncAdd(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
+func MatEncAdd(a, b BigMatrix, cs cryptosystem) (BigMatrix, error) {
     if a.rows != b.rows {
         panic(errors.New("row mismatch in addition"))
     } else if a.cols != b.cols {
@@ -113,7 +112,7 @@ func MatEncAdd(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
     }
     c := NewBigMatrix(a.rows, a.cols, nil)
     for i := range c.values {
-        val, err := pk.Add(a.values[i], b.values[i])
+        val, err := cs.Add(a.values[i], b.values[i])
         if err != nil {
             return c, err
         }
@@ -123,7 +122,7 @@ func MatEncAdd(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
 }
 
 // matrix subtraction of encrypted matrices
-func MatEncSub(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
+func MatEncSub(a, b BigMatrix, cs cryptosystem) (BigMatrix, error) {
     if a.rows != b.rows {
         panic(errors.New("row mismatch in subtraction"))
     } else if a.cols != b.cols {
@@ -131,11 +130,11 @@ func MatEncSub(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
     }
     c := NewBigMatrix(a.rows, a.cols, nil)
     for i := range c.values {
-        negB, _, err := pk.Multiply(b.values[i], big.NewInt(-1))
+        negB, err := cs.MultiplyScalar(b.values[i], big.NewInt(-1))
         if err != nil {
             return c, err
         }
-        val, err := pk.Add(a.values[i], negB)
+        val, err := cs.Add(a.values[i], negB)
         if err != nil {
             return c, err
         }
@@ -145,7 +144,7 @@ func MatEncSub(a, b BigMatrix, pk *tcpaillier.PubKey) (BigMatrix, error) {
 }
 
 // matrix multiplication encrypted * plain
-func MatEncRightMul(encrypted, plain BigMatrix, pk *tcpaillier.PubKey) (c BigMatrix, err error) {
+func MatEncRightMul(encrypted, plain BigMatrix, cs cryptosystem) (c BigMatrix, err error) {
     if encrypted.cols != plain.rows {
         panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", encrypted.rows, encrypted.cols, plain.rows, plain.cols))
     }
@@ -155,16 +154,16 @@ func MatEncRightMul(encrypted, plain BigMatrix, pk *tcpaillier.PubKey) (c BigMat
     for i := 0; i < cRows; i += 1 {
         for j := 0; j < cCols; j += 1 {
             var sum *big.Int
-            sum, _, err = pk.Multiply(encrypted.At(i, 0), plain.At(0, j))
+            sum, err = cs.MultiplyScalar(encrypted.At(i, 0), plain.At(0, j))
                 if err != nil {
                     return
                 }
             for k := 1; k < encrypted.cols; k += 1 {
-                r, _, err = pk.Multiply(encrypted.At(i, k), plain.At(k, j))
+                r, err = cs.MultiplyScalar(encrypted.At(i, k), plain.At(k, j))
                 if err != nil {
                     return
                 }
-                sum, err = pk.Add(r, sum)
+                sum, err = cs.Add(r, sum)
                 if err != nil {
                     return
                 }
@@ -176,7 +175,7 @@ func MatEncRightMul(encrypted, plain BigMatrix, pk *tcpaillier.PubKey) (c BigMat
 }
 
 // matrix multiplication plain * encrypted
-func MatEncLeftMul(plain, encrypted BigMatrix, pk *tcpaillier.PubKey) (c BigMatrix, err error) {
+func MatEncLeftMul(plain, encrypted BigMatrix, cs cryptosystem) (c BigMatrix, err error) {
     if plain.cols != encrypted.rows {
         panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", plain.rows, plain.cols, encrypted.rows, encrypted.cols))
     }
@@ -186,16 +185,16 @@ func MatEncLeftMul(plain, encrypted BigMatrix, pk *tcpaillier.PubKey) (c BigMatr
     for i := 0; i < cRows; i += 1 {
         for j := 0; j < cCols; j += 1 {
             var sum *big.Int
-            sum, _, err = pk.Multiply(encrypted.At(0, j), plain.At(i, 0))
+            sum, err = cs.MultiplyScalar(encrypted.At(0, j), plain.At(i, 0))
                 if err != nil {
                     return
                 }
             for k := 1; k < plain.cols; k += 1 {
-                r, _, err = pk.Multiply(encrypted.At(k, j), plain.At(i, k))
+                r, err = cs.MultiplyScalar(encrypted.At(k, j), plain.At(i, k))
                 if err != nil {
                     return
                 }
-                sum, err = pk.Add(r, sum)
+                sum, err = cs.Add(r, sum)
                 if err != nil {
                     return
                 }

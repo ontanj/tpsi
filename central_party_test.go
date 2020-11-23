@@ -11,9 +11,10 @@ func TestCPHankelMatrix(t *testing.T) {
     setting.m = 3
     setting.T = 2
     setting.n = 4
-    sks, pk, err := GenerateKeys(512, 1, setting.n)
+    pk, djsks, err := NewDJCryptosystem(512, setting.n)
+    sks := ConvertDJSKSlice(djsks)
     if err != nil {t.Error(err)}
-    setting.pk = pk
+    setting.cs = pk
     q := big.NewInt(11)
     u := big.NewInt(6)
     H, err := CPComputeHankelMatrix(items, u, q, setting)
