@@ -657,7 +657,7 @@ func OuterSingularityTestWorker(m BigMatrix, sk secret_key, setting Setting, cha
 
 
 // returns true if number of elements not shared by all is <= setting.T
-func CentralCardinalityTestWorker(items []int64, sk secret_key, setting Setting, channels []chan interface{}) bool {
+func CentralCardinalityTestWorker(items []uint64, sk secret_key, setting Setting, channels []chan interface{}) bool {
     self := setting.n-1
     u, err := SampleInt(setting.cs.N())
     if err != nil {panic(err)}
@@ -679,7 +679,7 @@ func CentralCardinalityTestWorker(items []int64, sk secret_key, setting Setting,
 }
 
 // returns true if number of elements not shared by all is <= setting.T
-func OuterCardinalityTestWorker(items []int64, sk secret_key, setting Setting, channel chan interface{}) bool {
+func OuterCardinalityTestWorker(items []uint64, sk secret_key, setting Setting, channel chan interface{}) bool {
     u := (<-channel).(*big.Int)
     H1, err := ComputeHankelMatrix(items, u, setting)
     if err != nil {panic(err)}
@@ -786,7 +786,7 @@ func OuterIntersectionPolyWorker(root_poly BigMatrix, sk secret_key, setting Set
 }
 
 // returns two slices, shared elements & unique elements
-func IntersectionWorker(items []int64, sk secret_key, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]int64, []int64) {
+func IntersectionWorker(items []uint64, sk secret_key, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]uint64, []uint64) {
     root_poly := PolyFromRoots(items, setting.cs.N())
     var vs BigMatrix
     var ps BigMatrix
@@ -797,8 +797,8 @@ func IntersectionWorker(items []int64, sk secret_key, setting Setting, central b
     }
     
     p := Interpolation(vs, ps, setting)
-    shared := make([]int64, 0, len(items))
-    unique := make([]int64, 0, len(items))
+    shared := make([]uint64, 0, len(items))
+    unique := make([]uint64, 0, len(items))
     for _, item := range items {
         if IsRoot(p, item, setting.cs.N()) {
             unique = append(unique, item)
@@ -811,7 +811,7 @@ func IntersectionWorker(items []int64, sk secret_key, setting Setting, central b
 }
 
 // returns two slices: shared elements & unique elements if cardinality test passes, otherwise nil, nil
-func TPSIdiffWorker(items []int64, sk secret_key, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]int64, []int64) {
+func TPSIdiffWorker(items []uint64, sk secret_key, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]uint64, []uint64) {
     var pred bool
     if central {
         pred = CentralCardinalityTestWorker(items, sk, setting, channels)

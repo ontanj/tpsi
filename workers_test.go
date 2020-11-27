@@ -568,11 +568,11 @@ func TestCardinalityTestWorker(t *testing.T) {
         setting.cs = pk
         setting.T = 8
         setting.m = 4
-        all_items := make([][]int64, setting.n)
-        all_items[0] = []int64{1,2,5,6}
-        all_items[1] = []int64{1,2,10,11}
-        all_items[2] = []int64{1,2,15,16}
-        all_items[3] = []int64{1,2,18,19}
+        all_items := make([][]uint64, setting.n)
+        all_items[0] = []uint64{1,2,5,6}
+        all_items[1] = []uint64{1,2,10,11}
+        all_items[2] = []uint64{1,2,15,16}
+        all_items[3] = []uint64{1,2,18,19}
         
         channels := create_chans(setting.n-1)
         return_channel := make(chan bool)
@@ -601,11 +601,11 @@ func TestCardinalityTestWorker(t *testing.T) {
         setting.cs = pk
         setting.T = 7
         setting.m = 6
-        all_items := make([][]int64, setting.n)
-        all_items[0] = []int64{1,2,3,4,5,6}
-        all_items[1] = []int64{1,2,3,4,10,11}
-        all_items[2] = []int64{1,2,3,4,15,16}
-        all_items[3] = []int64{1,2,3,4,20,21}
+        all_items := make([][]uint64, setting.n)
+        all_items[0] = []uint64{1,2,3,4,5,6}
+        all_items[1] = []uint64{1,2,3,4,10,11}
+        all_items[2] = []uint64{1,2,3,4,15,16}
+        all_items[3] = []uint64{1,2,3,4,20,21}
         
         channels := create_chans(setting.n-1)
         return_channel := make(chan bool)
@@ -628,10 +628,10 @@ func TestCardinalityTestWorker(t *testing.T) {
 }
 
 func TestIntersectionPoly(t *testing.T) {
-    items := [][]int64{[]int64{1,3,4,5},
-                       []int64{1,3,6,7},
-                       []int64{1,3,8,9},
-                       []int64{1,3,10,11}}
+    items := [][]uint64{[]uint64{1,3,4,5},
+                       []uint64{1,3,6,7},
+                       []uint64{1,3,8,9},
+                       []uint64{1,3,10,11}}
     var setting Setting
     setting.n = 4
     pk, sks, err := NewDJCryptosystem(512, setting.n)
@@ -673,11 +673,11 @@ func TestIntersectionPoly(t *testing.T) {
 func TestIntersection(t *testing.T) {
     var setting Setting
     setting.n = 4
-    items := [][]int64{
-        []int64{100,102,202,204,206},
-        []int64{100,102,302,304,306},
-        []int64{100,102,402,404,406},
-        []int64{100,102,502,504,506}}
+    items := [][]uint64{
+        []uint64{100,102,202,204,206},
+        []uint64{100,102,302,304,306},
+        []uint64{100,102,402,404,406},
+        []uint64{100,102,502,504,506}}
     no_shared := 2
     no_unique := 3
     setting.T = no_unique * setting.n
@@ -685,16 +685,16 @@ func TestIntersection(t *testing.T) {
     if err != nil {panic(err)}
     setting.cs = pk
     channels := create_chans(setting.n-1)
-    return_channels := make([]chan []int64, setting.n)
+    return_channels := make([]chan []uint64, setting.n)
     for i := 0; i < setting.n-1; i += 1 {
-        return_channels[i] = make(chan []int64)
+        return_channels[i] = make(chan []uint64)
         go func(i int) {
             shared, unique := IntersectionWorker(items[i], sks[i], setting, false, nil, channels[i])
             return_channels[i] <- shared
             return_channels[i] <- unique
         }(i)
     }
-    return_channels[setting.n-1] = make(chan []int64)
+    return_channels[setting.n-1] = make(chan []uint64)
     go func() {
         shared, unique := IntersectionWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
         return_channels[setting.n-1] <- shared
@@ -729,9 +729,9 @@ func TestTPSIdiff(t *testing.T) {
     var setting Setting
     setting.n = 3
     setting.m = 7
-    items := [][]int64{[]int64{2,4,6,8,10,12,14},
-                       []int64{2,4,6,8,10,16,18},
-                       []int64{2,4,6,8,12,20,22}}
+    items := [][]uint64{[]uint64{2,4,6,8,10,12,14},
+                       []uint64{2,4,6,8,10,16,18},
+                       []uint64{2,4,6,8,12,20,22}}
     pk, sks, err := NewDJCryptosystem(512, setting.n)
     if err != nil {t.Error(err)}
     setting.cs = pk
@@ -740,16 +740,16 @@ func TestTPSIdiff(t *testing.T) {
         no_shared := 4
         setting.T = 7
         channels := create_chans(setting.n-1)
-        returns := make([]chan []int64, setting.n)
+        returns := make([]chan []uint64, setting.n)
         for i := 0; i < setting.n-1; i += 1 {
-            returns[i] = make(chan []int64)
+            returns[i] = make(chan []uint64)
             go func(i int) {
                 sh, uq := TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i])
                 returns[i] <- sh
                 returns[i] <- uq
             }(i)
         }
-        returns[setting.n-1] = make(chan []int64)
+        returns[setting.n-1] = make(chan []uint64)
         go func() {
             sh, uq := TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
             returns[setting.n-1] <- sh
@@ -783,16 +783,16 @@ func TestTPSIdiff(t *testing.T) {
     t.Run("fail cardinality test", func(t *testing.T) {
         setting.T = 6
         channels := create_chans(setting.n-1)
-        returns := make([]chan []int64, setting.n)
+        returns := make([]chan []uint64, setting.n)
         for i := 0; i < setting.n-1; i += 1 {
-            returns[i] = make(chan []int64)
+            returns[i] = make(chan []uint64)
             go func(i int) {
                 sh, uq := TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i])
                 returns[i] <- sh
                 returns[i] <- uq
             }(i)
         }
-        returns[setting.n-1] = make(chan []int64)
+        returns[setting.n-1] = make(chan []uint64)
         go func() {
             sh, uq := TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
             returns[setting.n-1] <- sh

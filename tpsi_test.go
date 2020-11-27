@@ -7,7 +7,7 @@ import (
 
 func TestHankelMatrix(t *testing.T) {
     var setting Setting
-    items := []int64{2, 3, 5}
+    items := []uint64{2, 3, 5}
     setting.m = 3
     setting.T = 2
     setting.n = 4
@@ -276,7 +276,7 @@ func TestMPC(t *testing.T) {
 
 func TestEvalPoly(t *testing.T) {
     p := NewBigMatrix(1, 3, sliceToBigInt([]int64{2,4,3}))
-    x := []int64{0,1,2}
+    x := []uint64{0,1,2}
     y := sliceToBigInt([]int64{2,9,0})
     mod := big.NewInt(11)
     for i := 0; i < len(x); i += 1 {
@@ -303,7 +303,7 @@ func TestPolyMult(t *testing.T) {
 }
 
 func TestPolyFromRoots(t *testing.T) {
-    roots := []int64{1, 2}
+    roots := []uint64{1, 2}
     poly := NewBigMatrix(1,3, sliceToBigInt([]int64{2,8,1}))
     mod := big.NewInt(11)
     rpol := PolyFromRoots(roots, mod)

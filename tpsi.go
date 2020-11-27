@@ -37,7 +37,7 @@ func elMulSlice(sl1, sl2 []*big.Int, q *big.Int) []*big.Int {
 }
 
 // compute the Hankel Matrix for items and (random) u.
-func ComputePlainHankelMatrix(items []int64, u, q *big.Int, setting Setting) BigMatrix {
+func ComputePlainHankelMatrix(items []uint64, u, q *big.Int, setting Setting) BigMatrix {
     // u = big.NewInt(3)
     u_list := make([]*big.Int, setting.m) // stores u^a^i for each a
     u1_list := make([]*big.Int, setting.m) // stores u^a for each a
@@ -45,7 +45,7 @@ func ComputePlainHankelMatrix(items []int64, u, q *big.Int, setting Setting) Big
     H.Set(0, 0, big.NewInt(int64(setting.m)))
     for i := range u1_list {
         u1_list[i] = big.NewInt(0)
-        u1_list[i].Exp(u, big.NewInt(items[i]), q);
+        u1_list[i].Exp(u, new(big.Int).SetUint64(items[i]), q);
     }
     copy(u_list, u1_list)
     for i := 1; ; i += 1 { // each unique element in Hankel matrix
@@ -71,7 +71,7 @@ func ComputePlainHankelMatrix(items []int64, u, q *big.Int, setting Setting) Big
 }
 
 // compute and encrypt the Hankel Matrix for items and (random) u.
-func ComputeHankelMatrix(items []int64, u *big.Int, setting Setting) (BigMatrix, error) {
+func ComputeHankelMatrix(items []uint64, u *big.Int, setting Setting) (BigMatrix, error) {
     H := ComputePlainHankelMatrix(items, u, setting.cs.N(), setting)
     return EncryptMatrix(H, setting)
 }
@@ -235,9 +235,9 @@ func SumMultiplication(values []*big.Int, setting Setting) (sum *big.Int, err er
 }
 
 // evaluate polynomial p at point x
-func EvalPoly(p BigMatrix, x int64, mod *big.Int) *big.Int {
+func EvalPoly(p BigMatrix, x uint64, mod *big.Int) *big.Int {
     sum := new(big.Int).Set(p.At(0,0))
-    xb := big.NewInt(x)
+    xb := new(big.Int).SetUint64(x)
     x_raised := new(big.Int).Set(xb)
     term := new(big.Int)
     for i := 1; ; i += 1 {
@@ -266,10 +266,14 @@ func MultPoly(p1, p2 BigMatrix) BigMatrix {
     return NewBigMatrix(1, l, prod)
 }
 
-func PolyFromRoots(roots []int64, mod *big.Int) BigMatrix {
-    poly := NewBigMatrix(1,2,[]*big.Int{big.NewInt(-roots[0]), big.NewInt(1)})
+func PolyFromRoots(roots []uint64, mod *big.Int) BigMatrix {
+    n := new(big.Int)
+    n.SetUint64(roots[0]).Neg(n)
+    poly := NewBigMatrix(1,2,[]*big.Int{n, big.NewInt(1)})
     for i := 1; i < len(roots); i += 1 {
-        root := NewBigMatrix(1, 2, []*big.Int{big.NewInt(-roots[i]), big.NewInt(1)})
+        n = new(big.Int)
+        n.SetUint64(roots[i]).Neg(n)
+        root := NewBigMatrix(1, 2, []*big.Int{n, big.NewInt(1)})
         poly = MultPoly(poly, root)
     }
     for _, val := range poly.values {
@@ -356,7 +360,7 @@ func Interpolation(vs, ps BigMatrix, setting Setting) BigMatrix {
     return NewBigMatrix(1, len(den), den)
 }
 
-func IsRoot(poly BigMatrix, x int64, mod *big.Int) bool {
+func IsRoot(poly BigMatrix, x uint64, mod *big.Int) bool {
     return EvalPoly(poly, x, mod).Cmp(big.NewInt(0)) == 0
 }
 
@@ -377,7 +381,7 @@ func EvalIntPolys(root_poly BigMatrix, sample_max int, setting Setting) (R_value
     R_tilde_values = NewBigMatrix(1, sample_max, nil)
     p_values = NewBigMatrix(1, sample_max, nil)
     for i := 0; i < sample_max; i += 1 {
-        x := int64(i*2+1)
+        x := uint64(i*2+1)
         R_values.Set(0, i, EvalPoly(R, x, setting.cs.N()))
         R_tilde_values.Set(0, i, EvalPoly(R_tilde, x, setting.cs.N()))
         p_values.Set(0, i, EvalPoly(root_poly, x, setting.cs.N()))

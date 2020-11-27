@@ -7,7 +7,7 @@ import (
 
 func TestCPHankelMatrix(t *testing.T) {
     var setting Setting
-    items := []int64{2, 3, 5}
+    items := []uint64{2, 3, 5}
     setting.m = 3
     setting.T = 2
     setting.n = 4
