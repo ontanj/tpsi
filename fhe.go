@@ -16,6 +16,7 @@ type fhe_setting struct {
     crs *ring.Poly
     crp []*ring.Poly
     n int
+    T int
 }
 
 func CentralKeyGenerator(setting fhe_setting, channels []chan interface{}) (*bfv.PublicKey, *bfv.SecretKey, *bfv.EvaluationKey) {
@@ -120,13 +121,6 @@ func OuterKeyGenerator(setting fhe_setting, channel chan interface{}) (*bfv.Publ
     return pk, sk, rlk
 }
 
-// func Encrypt(input []uint64, params *bfv.Parameters, pk *bfv.PublicKey) *bfv.Ciphertext {
-    
-//     encInput := bfv.NewCiphertext(params, 1)
-//     encryptor.Encrypt(pt, encInput)
-//     return encInput
-// }
-
 func CentralDecryptor(enc *bfv.Ciphertext, sk *bfv.SecretKey, setting fhe_setting, channels []chan interface{}) []uint64 {
     pcks := dbfv.NewPCKSProtocol(setting.params, 3.19)
     pcksShare := pcks.AllocateShares()
@@ -179,34 +173,23 @@ func GenCRP(params *bfv.Parameters) (*ring.Poly, []*ring.Poly) {
 }
 
 func CentralInverseWorker(a *bfv.Ciphertext, sk *bfv.SecretKey, setting fhe_setting, channels []chan interface{}) *bfv.Ciphertext {
+    return CentralInverseWorkerWithFactor(a, 1, sk, setting, channels)
+}
+
+func CentralInverseWorkerWithFactor(a *bfv.Ciphertext, factor uint64, sk *bfv.SecretKey, setting fhe_setting, channels []chan interface{}) *bfv.Ciphertext {
     big_mask, err := SampleInt(new(big.Int).SetUint64(setting.params.T))
     if err != nil {panic(err)}
-    mask := big_mask.Uint64()
-
-    encoder := bfv.NewEncoder(setting.params)
-    encryptor := bfv.NewEncryptorFromPk(setting.params, setting.pk)
-    evaluator := bfv.NewEvaluator(setting.params)
-
-    mask_pt := bfv.NewPlaintext(setting.params)
-    encoder.EncodeUint([]uint64{mask}, mask_pt)
-
-    mask_enc := bfv.NewCiphertext(setting.params, 1)
-    store := bfv.NewCiphertext(setting.params, 2)
-    ab_enc := bfv.NewCiphertext(setting.params, 1)
-    encryptor.Encrypt(mask_pt, mask_enc)
+    int_mask := big_mask.Uint64()
+    mask := Encrypt(int_mask, setting)
     
-    all_masks := make([]*bfv.Ciphertext, setting.n)
-    all_masks[setting.n-1] = mask_enc
-
-    evaluator.Mul(a, mask_enc, store)
-    evaluator.Relinearize(store, setting.rlk, ab_enc)
-
-    for i, ch := range channels {
-        mask := (<-ch).(*bfv.Ciphertext)
-        all_masks[i] = mask
-        evaluator.Mul(ab_enc, mask, store)
-        evaluator.Relinearize(store, setting.rlk, ab_enc)
+    evaluator := bfv.NewEvaluator(setting.params)
+    for _, ch := range channels {
+        store := evaluator.MulNew(mask, (<-ch).(*bfv.Ciphertext))
+        mask = evaluator.RelinearizeNew(store, setting.rlk)
     }
+
+    store := evaluator.MulNew(mask, a)
+    ab_enc := evaluator.RelinearizeNew(store, setting.rlk)
 
     for _, ch := range channels {
         ch <- ab_enc
@@ -214,47 +197,294 @@ func CentralInverseWorker(a *bfv.Ciphertext, sk *bfv.SecretKey, setting fhe_sett
 
     ab := CentralDecryptor(ab_enc, sk, setting, channels)
 
-    ab_big := new(big.Int).SetUint64(ab[0])
+    ab_big := new(big.Int).SetUint64(ab[0]*factor)
     ab_big.ModInverse(ab_big, new(big.Int).SetUint64(setting.params.T))
     ab_inv := ab_big.Uint64()
+
+    ab_inv_enc := Encrypt(ab_inv, setting)
     
-    inv_pt := bfv.NewPlaintext(setting.params)
-    encoder.EncodeUint([]uint64{ab_inv}, inv_pt)
-    inv_enc := bfv.NewCiphertext(setting.params, 1)
-    encryptor.Encrypt(inv_pt, inv_enc)
-    
-    for _, mask := range all_masks {
-        evaluator.Mul(inv_enc, mask, store)
-        evaluator.Relinearize(store, setting.rlk, inv_enc)
-    }
+    store = evaluator.MulNew(ab_inv_enc, mask)
+    a_inv := evaluator.RelinearizeNew(store, setting.rlk)
 
     for _, ch := range channels {
-        ch <- inv_enc
+        ch <- a_inv
     }
 
-    return inv_enc
-
+    return a_inv
 }
 
-func OuterInverseWorker(a *bfv.Ciphertext, sk *bfv.SecretKey, setting fhe_setting, channel chan interface{}) *bfv.Ciphertext {
+func OuterInverseWorker(sk *bfv.SecretKey, setting fhe_setting, channel chan interface{}) *bfv.Ciphertext {
     big_mask, err := SampleInt(new(big.Int).SetUint64(setting.params.T))
     if err != nil {panic(err)}
     mask := big_mask.Uint64()
 
-    encoder := bfv.NewEncoder(setting.params)
-    pt := bfv.NewPlaintext(setting.params)
-    encoder.EncodeUint([]uint64{mask}, pt)
-    encryptor := bfv.NewEncryptorFromPk(setting.params, setting.pk)
-    cipher := bfv.NewCiphertext(setting.params, 1)
-    encryptor.Encrypt(pt, cipher)
+    cipher := Encrypt(mask, setting)
 
     channel <- cipher
-
+    
     ab_enc := (<-channel).(*bfv.Ciphertext)
+
     OuterDecryptor(ab_enc, sk, setting, channel)
 
     a_inv := (<-channel).(*bfv.Ciphertext)
 
     return a_inv
+}
 
+func Encrypt(val uint64, setting fhe_setting) *bfv.Ciphertext {
+    encoder := bfv.NewEncoder(setting.params)
+    pt := bfv.NewPlaintext(setting.params)
+    encoder.EncodeUint([]uint64{val}, pt)
+    
+    encryptor := bfv.NewEncryptorFromPk(setting.params, setting.pk)
+    enc := bfv.NewCiphertext(setting.params, 1)
+    encryptor.Encrypt(pt, enc)
+
+    return enc
+}
+
+// func FHECardinalityTestWorker(items []uint64, setting fhe_setting, channels []chan interface{}, channel chan interface{}) {
+//     // step 1
+//     var pk *bfv.PublicKey
+//     var sk *bfv.SecretKey
+//     var rlk *bfv.EvaluationKey
+//     if channels != nil {
+//         pk, sk, rlk = CentralKeyGenerator(setting, channels)
+//     } else {
+//         pk, sk, rlk = OuterKeyGenerator(setting, channel)
+//     }
+
+//     // step 2
+//     var z uint64
+//     if channels != nil {
+//         s, err := SampleInt(new(big.Int).SetUint64(setting.params.T))
+//         if err != nil {panic(err)}
+//         z = s.Uint64()
+//         for _, ch := range channels {
+//             ch <- z
+//         }
+//     } else {
+//         z = (<-channel).(uint64)
+//     }
+
+//     // step 3
+//     mod := new(big.Int).SetUint64(setting.params.T)
+//     p := PolyFromRoots(items, mod)
+//     evals := make([]*bfv.Ciphertext, 2*setting.T+3)
+//     var point uint64
+//     for i := range evals {
+//         point = uint64(i * 2 + 1)
+//         eval := EvalPoly(p, point, mod)
+//         evals[i] = Encrypt(eval.Uint64(), setting)
+//     }
+//     eval := EvalPoly(p, z, mod)
+//     z_eval := Encrypt(eval.Uint64(), setting)
+//     if channels == nil {
+//         channel <- evals
+//         channel <- z_eval
+//         for i := 0; i < 2*setting.T + 3; i += 1 {
+//             OuterInverseWorker(sk, setting, channel)
+//         }
+//     } else {
+//         all_evals := make([][]*bfv.Ciphertext, setting.n-1)
+//         for i, ch := range channels {
+//             all_evals[i] = (<-ch).([]*bfv.Ciphertext)
+//         }
+//         evals_sum := make([]*bfv.Ciphertext, 2*setting.T+3)
+//         evaluator := bfv.NewEvaluator(setting.params)
+//         store := bfv.NewCiphertext(setting.params, 2)
+//         for i, sum := range evals_sum {
+//             for _, eval := range all_evals {
+//                 evaluator.Add(sum, eval[i], store)
+//                 evaluator.Relinearize(store, rlk, sum)
+//             }
+//             inv := CentralInverseWorker(sum, sk, setting, channels)
+//             evaluator.Mul(inv, evals[i], store)
+//             evaluator.Relinearize(store, setting.rlk, sum)
+//         }
+
+//         FHEInterpolate(evals_sum, setting)
+//     }
+    
+// }
+
+func CentralFHEZeroTestWorker(a *bfv.Ciphertext, sk *bfv.SecretKey, setting fhe_setting, channels []chan interface{}) bool {
+    self := setting.n-1
+    
+    mask_big, err := SampleInt(new(big.Int).SetUint64(setting.params.T-1))
+    if err != nil {panic(err)}
+    mask_plain := mask_big.Uint64() + 1
+
+    sum := Encrypt(mask_plain, setting)
+    
+    evaluator := bfv.NewEvaluator(setting.params)
+    for i := 0; i < self; i += 1 {
+        evaluator.Add(sum, (<-channels[i]).(*bfv.Ciphertext), sum)
+    }
+
+    store := bfv.NewCiphertext(setting.params, 2)
+    evaluator.Mul(sum, a, store)
+    evaluator.Relinearize(store, setting.rlk, sum)
+
+    for _, ch := range channels {
+        ch <- sum
+    }
+    
+    pred := CentralDecryptor(sum, sk, setting, channels)
+
+    return pred[0] == 0
+}
+
+func OuterFHEZeroTestWorker(sk *bfv.SecretKey, setting fhe_setting, channel chan interface{}) bool {
+
+    mask_big, err := SampleInt(new(big.Int).SetUint64(setting.params.T-1))
+    if err != nil {panic(err)}
+    mask_plain := mask_big.Uint64() + 1
+
+    mask := Encrypt(mask_plain, setting)
+
+    channel <- mask
+
+    masked := (<-channel).(*bfv.Ciphertext)
+
+    pred := OuterDecryptor(masked, sk, setting, channel)
+
+    return pred[0] == 0    
+}
+
+func CentralRefresh(cipher *bfv.Ciphertext, sk *bfv.SecretKey, setting fhe_setting, channels []chan interface{}) *bfv.Ciphertext {
+    rpf := dbfv.NewRefreshProtocol(setting.params)
+    share := rpf.AllocateShares()
+    rpf.GenShares(sk.Get(), cipher, setting.crs, share)
+
+    for _, ch := range channels {
+        rpf.Aggregate(share, (<-ch).(dbfv.RefreshShare), share)
+    }
+    
+    newCipher := bfv.NewCiphertext(setting.params, 1)
+    rpf.Finalize(cipher, setting.crs, share, newCipher)
+
+    for _, ch := range channels {
+        ch <- newCipher
+    }
+
+    return newCipher
+}
+
+
+func OuterRefresh(cipher *bfv.Ciphertext, sk *bfv.SecretKey, setting fhe_setting, channel chan interface{}) *bfv.Ciphertext {
+    rpf := dbfv.NewRefreshProtocol(setting.params)
+    share := rpf.AllocateShares()
+    rpf.GenShares(sk.Get(), cipher, setting.crs, share)
+
+    channel <- share
+    
+    newCipher := (<-channel).(*bfv.Ciphertext)
+    
+    return newCipher
+}
+
+func CentralFHEInterpolation(q []*bfv.Ciphertext, sk *bfv.SecretKey, setting fhe_setting, channels []chan interface{}) []*bfv.Ciphertext {
+    sample_max := 2*setting.T + 3
+
+    relations := make([][]*bfv.Ciphertext, sample_max)
+    zero := Encrypt(0, setting)
+
+    evaluator := bfv.NewEvaluator(setting.params)
+    coeff_pos := 0
+    for ; coeff_pos < sample_max; coeff_pos += 1 {
+        eq := make([]*bfv.Ciphertext, sample_max + 1)
+        
+        x := uint64(2*coeff_pos+1)
+        x_pow := uint64(1)
+        
+        // populate rel_row with full equation
+        j := 0
+        for ; j < setting.T + 2; j += 1 {
+            eq[j] = Encrypt(x_pow, setting)
+            x_pow *= x
+        }
+        x_pow = 1
+        for ; j < sample_max + 1; j += 1 {
+            store := evaluator.MulNew(q[coeff_pos], Encrypt(setting.params.T-x_pow, setting))
+            eq[j] = evaluator.RelinearizeNew(store, setting.rlk)
+            x_pow = x_pow*x % setting.params.T
+        }
+
+        // substitue previous coefficents
+        for prev_coeff := 0; prev_coeff < coeff_pos; prev_coeff += 1 {
+            coeff := eq[prev_coeff]
+            for i := prev_coeff + 1; i < sample_max + 1; i += 1 {
+                store := evaluator.MulNew(relations[prev_coeff][i], coeff)
+                evaluator.Relinearize(store, setting.rlk, store)
+                if prev_coeff % 5 == 0 {
+                    for _, ch := range channels {
+                        ch <- store
+                    }
+                    store = CentralRefresh(store, sk, setting, channels)
+                }
+                evaluator.Add(store, eq[i], eq[i])
+            }
+            eq[prev_coeff] = Encrypt(0, setting)
+        }
+        
+        // if we get 0 = 0, we have all relations needed
+        if CentralFHEZeroTestWorker(eq[coeff_pos], sk, setting, channels) {
+            break
+        }
+        
+        // collect current coefficient
+        rel_row := make([]*bfv.Ciphertext, sample_max + 1)
+        coeff_inv := CentralInverseWorkerWithFactor(eq[coeff_pos], setting.params.T-1, sk, setting, channels)
+        rem_coeff := 0
+        for ; rem_coeff < coeff_pos + 1; rem_coeff += 1 {
+            rel_row[rem_coeff] = zero
+        }
+        for ; rem_coeff < sample_max + 1; rem_coeff += 1 {
+            store := evaluator.MulNew(eq[rem_coeff], coeff_inv)
+            rel := evaluator.RelinearizeNew(store, setting.rlk)
+            for _, ch := range channels {
+                ch <- rel
+            }
+            rel_row[rem_coeff] = CentralRefresh(rel, sk, setting, channels)
+        }
+
+        relations[coeff_pos] = rel_row
+    }
+
+    interpolated_coeffs := make([]*bfv.Ciphertext, sample_max + 1)
+    interpolated_coeffs[coeff_pos] = Encrypt(1, setting)
+
+    // solve all coefficients from relations
+    for solving_coeff := coeff_pos - 1; solving_coeff >= 0; solving_coeff -= 1 {
+        coeff := Encrypt(0, setting)
+        for known_coeff := solving_coeff + 1; known_coeff <= coeff_pos; known_coeff += 1 {
+            store := evaluator.MulNew(relations[solving_coeff][known_coeff], interpolated_coeffs[known_coeff])
+            evaluator.Relinearize(store, setting.rlk, store)
+            evaluator.Add(coeff, store, coeff)
+        }
+        interpolated_coeffs[solving_coeff] = coeff
+    }
+
+    return interpolated_coeffs[setting.T + 2:coeff_pos + 1]
+}
+
+func OuterFHEInterpolation(sk *bfv.SecretKey, setting fhe_setting, channel chan interface{}) {
+    sample_max := 2*setting.T + 3
+    for coeff_pos := 0; coeff_pos < sample_max; coeff_pos += 1 {
+        for prev_coeff := 0; prev_coeff < coeff_pos; prev_coeff += 1 {
+            for i := prev_coeff + 1; i < sample_max + 1; i += 1 {
+                if prev_coeff % 5 == 0 {
+                    OuterRefresh((<-channel).(*bfv.Ciphertext), sk, setting, channel)
+                }
+            }
+        }
+        if OuterFHEZeroTestWorker(sk, setting, channel) {
+            return
+        }
+        OuterInverseWorker(sk, setting, channel)
+        for rem_coeff := coeff_pos + 1 ; rem_coeff < sample_max + 1; rem_coeff += 1 {
+            OuterRefresh((<-channel).(*bfv.Ciphertext), sk, setting, channel)
+        }
+    }
 }
