@@ -288,11 +288,15 @@ func TestFHEZeroTest(t *testing.T) {
 }
 
 func SetupTest() (fhe_setting, []*bfv.SecretKey, []chan interface{}) {
+    return SetupTestN(4)
+}
+
+func SetupTestN(n int) (fhe_setting, []*bfv.SecretKey, []chan interface{}) {
     var setting fhe_setting
     params := bfv.DefaultParams[bfv.PN14QP438]
     params.T = 65537
     setting.params = params
-    setting.n = 4
+    setting.n = n
     channels := create_chans(setting.n-1)
     return_channels := create_chans(setting.n)
     crs, crp := GenCRP(params)
@@ -330,53 +334,151 @@ func SetupTest() (fhe_setting, []*bfv.SecretKey, []chan interface{}) {
 }
 
 func TestFHEInterpolation(t *testing.T) {
-    setting, sk, channels := SetupTest()
-    setting.T = 1
-    mod := new(big.Int).SetUint64(setting.params.T)
-    num := PolyFromRoots([]uint64{2,6}, mod)
-    den := PolyFromRoots([]uint64{4,8}, mod)
-    q := make([]*bfv.Ciphertext, setting.T*2+3)
-    // sol := []uint64{12,setting.params.T-8,1,32,setting.params.T-12,1}
-    sol := []uint64{32,setting.params.T-12,1}
-    for i := range q {
-        num_eval := EvalPoly(num, uint64(2*i+1), mod)
-        den_eval := EvalPoly(den, uint64(2*i+1), mod)
-        den_inv := new(big.Int).ModInverse(den_eval, mod)
-        a := new(big.Int)
-        q_p := a.Mul(num_eval, den_inv).Mod(a, mod).Uint64()
-        q[i] = Encrypt(q_p, setting)
-    }
-    ret := make(chan []*bfv.Ciphertext)
-
-    go func() {
-        den := CentralFHEInterpolation(q, sk[setting.n-1], setting, channels)
-        ret <- den
-    }()
-    for i := range channels {
-        go func(i int) {
-            OuterFHEInterpolation(sk[i], setting, channels[i])
-        }(i)
-    }
-
-    int_den := <-ret
-    if len(int_den) != len(sol) {
-        t.Errorf("wrong length, expected %d, got %d", den.cols, len(int_den))
-    }
-    rets := create_chans(setting.n)
-    for index := range int_den {
-        go func(index int) {
-            rets[setting.n-1] <- CentralDecryptor(int_den[index], sk[setting.n-1], setting, channels)
-        }(index)
-        for party := range channels {
-            go func(index, party int) {
-                rets[party] <- OuterDecryptor(int_den[index], sk[party], setting, channels[party])
-            }(index, party)
+    t.Run("at threshold", func(t *testing.T) {
+        setting, sk, channels := SetupTest()
+        setting.T = 1
+        mod := new(big.Int).SetUint64(setting.params.T)
+        num := PolyFromRoots([]uint64{2,6}, mod)
+        den := PolyFromRoots([]uint64{4,8}, mod)
+        q := make([]*bfv.Ciphertext, setting.T*2+3)
+        sol := []uint64{12,setting.params.T-8,1,32,setting.params.T-12,1}
+        for i := range q {
+            num_eval := EvalPoly(num, uint64(2*i+1), mod)
+            den_eval := EvalPoly(den, uint64(2*i+1), mod)
+            den_inv := new(big.Int).ModInverse(den_eval, mod)
+            a := new(big.Int)
+            q_p := a.Mul(num_eval, den_inv).Mod(a, mod).Uint64()
+            q[i] = Encrypt(q_p, setting)
         }
-        for p, ch := range rets {
-            dec := (<-ch).([]uint64)
-            if dec[0] != sol[index] {
-                t.Errorf("wrong number for party %d at index %d, expected %d got %d", p, index, sol[index], dec[0])
+        ret := make(chan []*bfv.Ciphertext)
+
+        go func() {
+            den := CentralFHEInterpolation(q, sk[setting.n-1], setting, channels)
+            ret <- den
+        }()
+        for i := range channels {
+            go func(i int) {
+                OuterFHEInterpolation(sk[i], setting, channels[i])
+            }(i)
+        }
+
+        int_den := <-ret
+        if len(int_den) != len(sol) {
+            t.Errorf("wrong length, expected %d, got %d", den.cols, len(int_den))
+        }
+        rets := create_chans(setting.n)
+        for index := range int_den {
+            go func(index int) {
+                rets[setting.n-1] <- CentralDecryptor(int_den[index], sk[setting.n-1], setting, channels)
+            }(index)
+            for party := range channels {
+                go func(index, party int) {
+                    rets[party] <- OuterDecryptor(int_den[index], sk[party], setting, channels[party])
+                }(index, party)
+            }
+            for p, ch := range rets {
+                dec := (<-ch).([]uint64)
+                if dec[0] != sol[index] {
+                    t.Errorf("wrong number for party %d at index %d, expected %d got %d", p, index, sol[index], dec[0])
+                }
             }
         }
-    }
+    })
+    t.Run("below threshold", func(t *testing.T) {
+        setting, sk, channels := SetupTest()
+        setting.T = 3
+        mod := new(big.Int).SetUint64(setting.params.T)
+        num := PolyFromRoots([]uint64{2,6}, mod)
+        den := PolyFromRoots([]uint64{4,8}, mod)
+        q := make([]*bfv.Ciphertext, setting.T*2+3)
+        sol := []uint64{12,setting.params.T-8,1,0,0,32,setting.params.T-12,1}
+        for i := range q {
+            num_eval := EvalPoly(num, uint64(2*i+1), mod)
+            den_eval := EvalPoly(den, uint64(2*i+1), mod)
+            den_inv := new(big.Int).ModInverse(den_eval, mod)
+            a := new(big.Int)
+            q_p := a.Mul(num_eval, den_inv).Mod(a, mod).Uint64()
+            q[i] = Encrypt(q_p, setting)
+        }
+        ret := make(chan []*bfv.Ciphertext)
+
+        go func() {
+            den := CentralFHEInterpolation(q, sk[setting.n-1], setting, channels)
+            ret <- den
+        }()
+        for i := range channels {
+            go func(i int) {
+                OuterFHEInterpolation(sk[i], setting, channels[i])
+            }(i)
+        }
+
+        int_den := <-ret
+        if len(int_den) != len(sol) {
+            t.Errorf("wrong length, expected %d, got %d", den.cols, len(int_den))
+        }
+        rets := create_chans(setting.n)
+        for index := range int_den {
+            go func(index int) {
+                rets[setting.n-1] <- CentralDecryptor(int_den[index], sk[setting.n-1], setting, channels)
+            }(index)
+            for party := range channels {
+                go func(index, party int) {
+                    rets[party] <- OuterDecryptor(int_den[index], sk[party], setting, channels[party])
+                }(index, party)
+            }
+            for p, ch := range rets {
+                dec := (<-ch).([]uint64)
+                if dec[0] != sol[index] {
+                    t.Errorf("wrong number for party %d at index %d, expected %d got %d", p, index, sol[index], dec[0])
+                }
+            }
+        }
+    })
+}
+
+func TestFHECardinalityTest(t *testing.T) {
+    setting, sk, channels := SetupTest()
+    t.Run("passing cardinality test", func(t *testing.T) {
+        setting.T = 3
+        ret := make(chan bool)
+        items := [][]uint64{[]uint64{2,4,6,8,10},
+                            []uint64{2,4,6,12,14},
+                            []uint64{2,4,6,16,18},
+                            []uint64{2,4,6,20,22}}
+        go func() {
+            ret <- CentralFHECardinalityTestWorker(items[setting.n-1], sk[setting.n-1], setting, channels, nil)
+        }()
+        for i := range channels {
+            go func(i int) {
+                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], setting, nil, channels[i])
+            }(i)
+        }
+        for _ = range items {
+            if !<-ret {
+                t.Error("cardinality test failed")
+            }
+        }
+    })
+
+    t.Run("failing cardinality test", func(t *testing.T) {
+        setting.T = 2
+        ret := make(chan bool)
+        items := [][]uint64{[]uint64{2,4,6,8,10,24},
+                            []uint64{2,4,6,12,14,26},
+                            []uint64{2,4,6,16,18,28},
+                            []uint64{2,4,6,20,22,30}}
+        go func() {
+            ret <- CentralFHECardinalityTestWorker(items[setting.n-1], sk[setting.n-1], setting, channels, nil)
+        }()
+        for i := range channels {
+            go func(i int) {
+                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], setting, nil, channels[i])
+            }(i)
+        }
+        for _ = range items {
+            if <-ret {
+                t.Error("cardinality test passed")
+            }
+        }
+    })
 }
