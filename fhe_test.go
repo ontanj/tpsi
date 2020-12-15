@@ -364,7 +364,7 @@ func TestFHEInterpolation(t *testing.T) {
 
         int_den := <-ret
         if len(int_den) != len(sol) {
-            t.Errorf("wrong length, expected %d, got %d", den.cols, len(int_den))
+            t.Errorf("wrong length, expected %d, got %d", den.Cols, len(int_den))
         }
         rets := create_chans(setting.n)
         for index := range int_den {
@@ -414,7 +414,7 @@ func TestFHEInterpolation(t *testing.T) {
 
         int_den := <-ret
         if len(int_den) != len(sol) {
-            t.Errorf("wrong length, expected %d, got %d", den.cols, len(int_den))
+            t.Errorf("wrong length, expected %d, got %d", den.Cols, len(int_den))
         }
         rets := create_chans(setting.n)
         for index := range int_den {

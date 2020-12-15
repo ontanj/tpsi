@@ -3,6 +3,7 @@ package tpsi
 import (
     "testing"
     "math/big"
+    gm "github.com/ontanj/generic-matrix"
 )
 
 func TestHankelMatrix(t *testing.T) {
@@ -11,22 +12,25 @@ func TestHankelMatrix(t *testing.T) {
     setting.m = 3
     setting.T = 2
     setting.n = 4
-    pk, _, err := NewDJCryptosystem(512, setting.n)
+    pk, _, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     if err != nil {t.Error(err)}
     setting.cs = pk
     q := big.NewInt(11)
     u := big.NewInt(6)
     H := ComputePlainHankelMatrix(items, u, q, setting)
-    H_corr := NewBigMatrix(3, 3, sliceToBigInt([]int64{3,9,4,9,4,6,4,6,8}))
+    H_corr := []int64{3,9,4,9,4,6,4,6,8}
     t.Run("check dimensions", func(t *testing.T){
-        if H.rows != setting.T + 1 || H.cols != setting.T + 1 {
+        if H.Rows != setting.T + 1 || H.Cols != setting.T + 1 {
             t.Error("wrong dimensions")
         }
     })
     t.Run("check elements", func(t *testing.T){
         for i := 0; i < 3; i += 1 {
             for j := 0; j < 3; j += 1 {
-                if H.At(i,j).Cmp(H_corr.At(i,j)) != 0 {
+                h_val, err := H.At(i,j)
+                if err != nil {t.Error(err)}
+                if h_val.(*big.Int).Cmp(new(big.Int).SetInt64(H_corr[i*3 + j])) != 0 {
                     t.Error("incorrect values")
                 }
             }
@@ -35,12 +39,10 @@ func TestHankelMatrix(t *testing.T) {
 }
 
 func TestEncryptValue(t *testing.T) {
-    pk, sks, error := NewDJCryptosystem(512, 4)
-    if error != nil {
-        t.Errorf("%v", error)
-        return
-    }
     var setting Setting
+    pk, sks, eval_space, err := NewDJCryptosystem(4)
+    if err != nil {t.Error(err)}
+    setting.eval_space = eval_space
     setting.cs = pk
     plaintext := big.NewInt(32)
     ciphertext, err := setting.cs.Encrypt(plaintext)
@@ -69,36 +71,33 @@ func TestEncryptValue(t *testing.T) {
 
 func TestEncryptMatrix(t *testing.T) {
     var setting Setting
-    pk, djsks, err := NewDJCryptosystem(512, 4)
+    pk, djsks, eval_space, err := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     sks := ConvertDJSKSlice(djsks)
     setting.cs = pk
-    if err != nil {
-        t.Errorf("%v", err)
-        return
-    }
-    vals := []int64{1,2,3,4,5,6,7,8,9}
-    a := NewBigMatrix(3, 3, sliceToBigInt(vals))
+    if err != nil {t.Error(err)}
+    vals := []int{1,2,3,4,5,6,7,8,9}
+    a, err := gm.NewMatrixFromInt(3, 3, vals)
+    if err != nil {t.Error(err)}
     a, err = EncryptMatrix(a, setting)
-    if err != nil {
-        t.Errorf("%v", err)
-    }
-    b := NewBigMatrix(3, 3, sliceToBigInt([]int64{1,2,3,4,5,6,7,8,9}))
+    if err != nil {t.Error(err)}
+    b, err := gm.NewMatrixFromInt(3, 3, []int{1,2,3,4,5,6,7,8,9})
+    if err != nil {t.Error(err)}
     
     CompareEnc(a, b, sks, setting, t)
 }
 
 func TestDecryptMatrix(t *testing.T) {
     var setting Setting
-    pk, sks, err := NewDJCryptosystem(512, 4)
+    pk, sks, eval_space, err := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     setting.cs = pk
-    if err != nil {
-        t.Errorf("%v", err)
-        return
-    }
-    vals := []int64{1,2,3,4,5,6,7,8,9}
-    a := NewBigMatrix(3, 3, sliceToBigInt(vals))
+    if err != nil {t.Error(err)}
+    vals := []int{1,2,3,4,5,6,7,8,9}
+    a, err := gm.NewMatrixFromInt(3, 3, vals)
+    if err != nil {t.Error(err)}
     enc, _ := EncryptMatrix(a, setting)
-    partial_decrypts := make([]PartialMatrix, len(sks))
+    partial_decrypts := make([]gm.Matrix, len(sks))
     for i, sk := range sks {
         pd, err := PartialDecryptMatrix(enc, sk)
         if err != nil {
@@ -112,7 +111,11 @@ func TestDecryptMatrix(t *testing.T) {
     }
     for i := 0; i < 3; i += 1 {
         for j := 0; j < 3; j += 1 {
-            if decrypted.At(i, j).Cmp(a.At(i, j)) != 0 {
+            dec_val, err := decrypted.At(i, j)
+            if err != nil {t.Error(err)}
+            a_val, err := a.At(i, j)
+            if err != nil {t.Error(err)}
+            if dec_val.(*big.Int).Cmp(a_val.(*big.Int)) != 0 {
                 t.Error("values differ")
             }
         }
@@ -121,45 +124,49 @@ func TestDecryptMatrix(t *testing.T) {
 }
 
 // checks if encrypted matrix a is equal to unencrypted matrix b, returns error otherwise
-func CompareEnc(enc, plain BigMatrix, sks []secret_key, setting Setting, t *testing.T) {
-    for i := 0; i < enc.rows; i += 1 {
-        for j := 0; j < enc.cols; j += 1 {
+func CompareEnc(enc, plain gm.Matrix, sks []secret_key, setting Setting, t *testing.T) {
+    for i := 0; i < enc.Rows; i += 1 {
+        for j := 0; j < enc.Cols; j += 1 {
             decryptShares := make([]partial_decryption, len(sks))
             for k, sk := range sks {
-                dks, err := sk.PartialDecrypt(enc.At(i, j))
-                if err != nil {
-                    t.Error(err)
-                }
+                enc_val, err := enc.At(i, j)
+                if err != nil {t.Error(err)}
+                dks, err := sk.PartialDecrypt(enc_val.(*big.Int))
+                if err != nil {t.Error(err)}
                 decryptShares[k] = dks
             }
             dec_plaintext, err := setting.cs.CombinePartials(decryptShares)
-            if err != nil {
-                t.Error(err)
-            }
-            if dec_plaintext.Cmp(plain.At(i,j)) != 0 {
-                t.Errorf("decrypted values is wrong for (%d, %d), expected %d, got %d", i, j, plain.At(i,j), dec_plaintext)
+            if err != nil {t.Error(err)}
+            plain_val, err := plain.At(i,j)
+            if err != nil {t.Error(err)}
+            if dec_plaintext.Cmp(plain_val.(*big.Int)) != 0 {
+                t.Errorf("decrypted values is wrong for (%d, %d), expected %d, got %d", i, j, plain_val, dec_plaintext)
             }
         }
     }
 }
 
 func TestMMult(t *testing.T) {
-    A := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6, 7, 8, 9}))
-    B := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 1, 2, 1, 2, 1, 2, 1}))
-    AB_corr := MatMul(A, B)
+    A, err := gm.NewMatrixFromInt(3, 3, []int{1, 2, 3, 4, 5, 6, 7, 8, 9})
+    if err != nil {t.Error(err)}
+    B, err := gm.NewMatrixFromInt(3, 3, []int{1, 2, 1, 2, 1, 2, 1, 2, 1})
+    if err != nil {t.Error(err)}
+    AB_corr, err := A.Multiply(B)
+    if err != nil {t.Error(err)}
     var setting Setting
     setting.n = 4
-    pk, djsks, _ := NewDJCryptosystem(512, setting.n)
+    pk, djsks, eval_space, _ := NewDJCryptosystem(setting.n)
     sks := ConvertDJSKSlice(djsks)
     setting.cs = pk
+    setting.eval_space = eval_space
     A, _ = EncryptMatrix(A, setting)
     B, _ = EncryptMatrix(B, setting)
 
     // step1
-    RAs_clear := make([]BigMatrix, setting.n)
-    RBs_clear := make([]BigMatrix, setting.n)
-    RAs_crypt := make([]BigMatrix, setting.n)
-    RBs_crypt := make([]BigMatrix, setting.n)
+    RAs_clear := make([]gm.Matrix, setting.n)
+    RBs_clear := make([]gm.Matrix, setting.n)
+    RAs_crypt := make([]gm.Matrix, setting.n)
+    RBs_crypt := make([]gm.Matrix, setting.n)
     for i := 0; i < setting.n; i += 1 {
         RAi_clear, RAi_crypt, RBi_clear, RBi_crypt, err := SampleRMatrices(A, B, setting)
         if err != nil {t.Error(err)}
@@ -174,9 +181,9 @@ func TestMMult(t *testing.T) {
     if err != nil {t.Error(err)}
 
     // step 3
-    cts := make([]BigMatrix, setting.n)
-    MA_parts := make([]PartialMatrix, setting.n)
-    MB_parts := make([]PartialMatrix, setting.n)
+    cts := make([]gm.Matrix, setting.n)
+    MA_parts := make([]gm.Matrix, setting.n)
+    MB_parts := make([]gm.Matrix, setting.n)
     for i := 0; i < setting.n; i += 1 {
         cti, MA_part, MB_part, err := GetCti(MA, MB, RA, RAs_clear[i], RBs_clear[i], setting, sks[i])
         if err != nil {t.Error(err)}
@@ -195,7 +202,8 @@ func TestMPC(t *testing.T) {
     a_plain := big.NewInt(13)
     var setting Setting
     setting.n = 4
-    pk, sks, err := NewDJCryptosystem(512, setting.n)
+    pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     if err != nil {
         t.Error(err)
         return
@@ -275,65 +283,77 @@ func TestMPC(t *testing.T) {
 }
 
 func TestEvalPoly(t *testing.T) {
-    p := NewBigMatrix(1, 3, sliceToBigInt([]int64{2,4,3}))
+    p, err := gm.NewMatrixFromInt(1, 3, []int{2,4,3})
+    if err != nil {t.Error(err)}
     x := []uint64{0,1,2}
-    y := sliceToBigInt([]int64{2,9,0})
+    y := []int64{2,9,0}
     mod := big.NewInt(11)
     for i := 0; i < len(x); i += 1 {
         ev_y := EvalPoly(p, x[i], mod)
-        if ev_y.Cmp(y[i]) != 0 {
+        if ev_y.Cmp(new(big.Int).SetInt64(y[i])) != 0 {
             t.Errorf("expected %d, got %d", y[i], ev_y)
         }
     }
 }
 
 func TestPolyMult(t *testing.T) {
-    a := NewBigMatrix(1, 3, sliceToBigInt([]int64{3,2,1}))
-    b := NewBigMatrix(1, 3, sliceToBigInt([]int64{2,4,1}))
-    ab_corr := NewBigMatrix(1, 5, sliceToBigInt([]int64{6,16,13,6,1}))
+    a, err := gm.NewMatrixFromInt(1, 3, []int{3,2,1})
+    if err != nil {t.Error(err)}
+    b, err := gm.NewMatrixFromInt(1, 3, []int{2,4,1})
+    if err != nil {t.Error(err)}
+    ab_corr := []int64{6,16,13,6,1}
     ab := MultPoly(a, b)
-    for i := 0; i < ab_corr.cols; i += 1 {
-        if ab_corr.At(0,i).Cmp(ab.At(0,i)) != 0 {
-            t.Errorf("error at %d: expected %d, got %d", i, ab_corr.At(0,i), ab.At(0,i))
-        }
+    if ab.Cols != len(ab_corr) {
+        t.Errorf("length mismatch: expected %d, got %d", len(ab_corr), ab.Cols)
     }
-    if ab.cols != ab_corr.cols {
-        t.Errorf("length mismatch: expected %d, got %d", ab_corr.cols, ab.cols)
+    for i := 0; i < len(ab_corr); i += 1 {
+        ab_val, err := ab.At(0,i)
+        if err != nil {t.Error(err)}
+        if new(big.Int).SetInt64(ab_corr[i]).Cmp(ab_val.(*big.Int)) != 0 {
+            t.Errorf("error at %d: expected %d, got %d", i, ab_corr[i], ab_val)
+        }
     }
 }
 
 func TestPolyFromRoots(t *testing.T) {
     roots := []uint64{1, 2}
-    poly := NewBigMatrix(1,3, sliceToBigInt([]int64{2,8,1}))
+    poly := []int64{2,8,1}
     mod := big.NewInt(11)
     rpol := PolyFromRoots(roots, mod)
-    for i := 0; i < poly.cols; i += 1 {
-        if poly.At(0,i).Cmp(rpol.At(0,i)) != 0 {
-            t.Errorf("error at %d: expected %d, got %d", i, poly.At(0,i), rpol.At(0,i))
-        }
+    if len(poly) != rpol.Cols {
+        t.Errorf("length mismatch: expected %d, got %d", len(poly), rpol.Cols)
     }
-    if poly.cols != rpol.cols {
-        t.Errorf("length mismatch: expected %d, got %d", poly.cols, rpol.cols)
+    for i := 0; i < len(poly); i += 1 {
+        rpol_val, err := rpol.At(0,i)
+        if err != nil {t.Error(err)}
+        if new(big.Int).SetInt64(poly[i]).Cmp(rpol_val.(*big.Int)) != 0 {
+            t.Errorf("error at %d: expected %d, got %d", i, poly[i], rpol_val)
+        }
     }
 }
 
 func TestInterpolation(t *testing.T) {
-    vs := NewBigMatrix(1, 7, sliceToBigInt([]int64{19, 6, 7, 12, 4, 5, 7}))//, 18, 16, 18}))
-    ps := NewBigMatrix(1, 7, sliceToBigInt([]int64{22, 21, 5, 20, 20, 5, 21}))//, 22, 8, 2}))
+    vs, err := gm.NewMatrixFromInt(1, 7, []int{19, 6, 7, 12, 4, 5, 7})//, 18, 16, 18}))
+    if err != nil {t.Error(err)}
+    ps, err := gm.NewMatrixFromInt(1, 7, []int{22, 21, 5, 20, 20, 5, 21})//, 22, 8, 2}))
+    if err != nil {t.Error(err)}
     // v_corr := []*big.Int{21,6,12,2,1}
-    p_corr := sliceToBigInt([]int64{14,7,1})
+    p_corr := []int64{14,7,1}
     var setting Setting
-    pk, _, _ := NewDJCryptosystem(512, 4)
+    pk, _, eval_space, _ := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     pk.PubKey.N = big.NewInt(23)
     setting.cs = pk
     setting.T = 1
     p := Interpolation(vs, ps, setting)
-    if len(p_corr) != p.cols {
-        t.Errorf("wrong degree on interpolated polynomial; expected %d, got %d", len(p_corr), p.cols)
+    if len(p_corr) != p.Cols {
+        t.Errorf("wrong degree on interpolated polynomial; expected %d, got %d", len(p_corr), p.Cols)
     } else {
         for i, p_coeff := range p_corr {
-            if p_coeff.Cmp(p.At(0,i)) != 0 {
-                t.Errorf("expected %d, got %d", p_coeff, p.At(0,i))
+            p_val, err := p.At(0,i)
+            if err != nil {t.Error(err)}
+            if new(big.Int).SetInt64(p_coeff).Cmp(p_val.(*big.Int)) != 0 {
+                t.Errorf("expected %d, got %d", p_coeff, p_val.(*big.Int))
             }
         }
     }

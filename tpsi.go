@@ -3,10 +3,12 @@ package tpsi
 import (
     "math/big"
     "math"
+    gm "github.com/ontanj/generic-matrix"
 )
 
 type Setting struct {
     cs cryptosystem
+    eval_space gm.Space
     n int // number of participants
     m int // set size
     T int // threshold
@@ -37,10 +39,11 @@ func elMulSlice(sl1, sl2 []*big.Int, q *big.Int) []*big.Int {
 }
 
 // compute the Hankel Matrix for items and (random) u.
-func ComputePlainHankelMatrix(items []uint64, u, q *big.Int, setting Setting) BigMatrix {
+func ComputePlainHankelMatrix(items []uint64, u, q *big.Int, setting Setting) gm.Matrix {
     u_list := make([]*big.Int, setting.m) // stores u^a^i for each a
     u1_list := make([]*big.Int, setting.m) // stores u^a for each a
-    H := NewBigMatrix(setting.T + 1, setting.T + 1, nil)
+    H, err := gm.NewMatrix(setting.T + 1, setting.T + 1, nil, gm.Bigint{})
+    if err != nil {panic(err)}
     H.Set(0, 0, big.NewInt(int64(setting.m)))
     for i := range u1_list {
         u1_list[i] = new(big.Int).Exp(u, new(big.Int).SetUint64(items[i]), q); // u^a mod q
@@ -69,23 +72,19 @@ func ComputePlainHankelMatrix(items []uint64, u, q *big.Int, setting Setting) Bi
 }
 
 // compute and encrypt the Hankel Matrix for items and (random) u.
-func ComputeHankelMatrix(items []uint64, u *big.Int, setting Setting) (BigMatrix, error) {
+func ComputeHankelMatrix(items []uint64, u *big.Int, setting Setting) (gm.Matrix, error) {
     H := ComputePlainHankelMatrix(items, u, setting.cs.N(), setting)
     return EncryptMatrix(H, setting)
 }
 
 // encrypt matrix item-wise
-func EncryptMatrix(a BigMatrix, setting Setting) (b BigMatrix, err error) {
-    b = NewBigMatrix(a.rows, a.cols, nil)
-    var c *big.Int
-    for i := range a.values {
-        c, err = setting.cs.Encrypt(a.values[i])
-        if err != nil {
-            return
-        }
-        b.values[i] = c;
-    }
-    return
+func EncryptMatrix(a gm.Matrix, setting Setting) (b gm.Matrix, err error) {
+    m, err := a.Apply(func(plain interface{}) (enc interface{}, err error) {
+        return setting.cs.Encrypt(plain.(*big.Int))
+    })
+    if err != nil {return}
+    m.Space = setting.eval_space
+    return m, nil
 }
 
 // perform partial decryption for key share secret_key
@@ -94,61 +93,61 @@ func PartialDecryptValue(cipher *big.Int, secret_key secret_key) (partial_decryp
 }
 
 // perform partial decryption for key share secret_key
-func PartialDecryptMatrix(cipher BigMatrix, secret_key secret_key) (part_mat PartialMatrix, err error) {
-    dec_vals := make([]partial_decryption, len(cipher.values))
-    var part_val partial_decryption
-    for i, enc_val := range cipher.values {
-        part_val, err = secret_key.PartialDecrypt(enc_val)
-        if err != nil {
-            return
-        }
-        dec_vals[i] = part_val
-    }
-    part_mat = PartialMatrix{values: dec_vals, rows: cipher.rows, cols: cipher.cols}
-    return
+func PartialDecryptMatrix(cipher gm.Matrix, secret_key secret_key) (part_mat gm.Matrix, err error) { //todo: wrap in PartialMatrix?
+    return cipher.Apply(func(plain interface{}) (enc interface{}, err error) {
+        return secret_key.PartialDecrypt(plain.(*big.Int))
+    })
 }
 
 // combine partial matrix decryptions to receive plaintext matrix
-func CombineMatrixShares(part_mat []PartialMatrix, setting Setting) (decrypted BigMatrix, err error) {
-    dec_mat_vals := make([]*big.Int, len(part_mat[0].values))
+func CombineMatrixShares(part_mat []gm.Matrix, setting Setting) (decrypted gm.Matrix, err error) {
+    decrypted, err = gm.NewMatrix(part_mat[0].Rows, part_mat[0].Cols, nil, gm.Bigint{}) //todo: space is partial decrypted; gpr det implementera add för partial space
+    if err != nil {return}
     var dec *big.Int
-    for i := range part_mat[0].values {
-        el_vals := make([]partial_decryption, len(part_mat))
-        for j := range part_mat {
-            el_vals[j] = part_mat[j].values[i]
+    for row := 0; row < part_mat[0].Rows; row += 1 {
+        for col := 0; col < part_mat[0].Cols; col += 1 {
+            el_vals := make([]partial_decryption, len(part_mat))
+            for j := range part_mat {
+                el_vals[j], err = part_mat[j].At(row, col)
+                if err != nil {return}
+            }
+            dec, err = setting.cs.CombinePartials(el_vals)
+            if err != nil {return}
+            decrypted.Set(row, col, dec)
         }
-        dec, err = setting.cs.CombinePartials(el_vals)
-        if err != nil {
-            return
-        }
-        dec_mat_vals[i] = dec
     }
-    decrypted = NewBigMatrix(part_mat[0].rows, part_mat[0].cols, dec_mat_vals)
-    return
+    return decrypted, nil
+}
+
+func SampleSlice(l int, q *big.Int) (a []*big.Int, err error) {
+    vals := make([]*big.Int, l)
+    var r *big.Int
+    for i := 0; i < l; i += 1 {
+        r, err = SampleInt(q)
+        if err != nil {return}
+        vals[i] = r
+    }
+    return vals, nil
 }
 
 // sample a matrix with size rows x cols, with elements from field defined by q
-func SampleMatrix(rows, cols int, q *big.Int) (a BigMatrix, err error) {
-    vals := make([]*big.Int, rows*cols)
-    var r *big.Int
-    for i := range vals {
-        r, err = SampleInt(q)
-        if err != nil {
-            return
-        }
-        vals[i] = r
+func SampleMatrix(rows, cols int, q *big.Int) (a gm.Matrix, err error) {
+    vals_big, err := SampleSlice(rows*cols, q)
+    if err != nil {return}
+    vals := make([]interface{}, len(vals_big))
+    for i, val := range vals_big {
+        vals[i] = val
     }
-    a = NewBigMatrix(rows, cols, vals)
-    return
+    return gm.NewMatrix(rows, cols, vals, gm.Bigint{})
 }
 
 //step 1 of MMult
-func SampleRMatrices(a, b BigMatrix, setting Setting) (RAi_plain, RAi_enc, RBi_plain, RBi_enc BigMatrix, err error) {
-    RAi_plain, err = SampleMatrix(a.rows, a.cols, setting.cs.N())
+func SampleRMatrices(a, b gm.Matrix, setting Setting) (RAi_plain, RAi_enc, RBi_plain, RBi_enc gm.Matrix, err error) {
+    RAi_plain, err = SampleMatrix(a.Rows, a.Cols, setting.cs.N())
     if err != nil {return}
     RAi_enc, err = EncryptMatrix(RAi_plain, setting)
     if err != nil {return}
-    RBi_plain, err = SampleMatrix(b.rows, b.cols, setting.cs.N())
+    RBi_plain, err = SampleMatrix(b.Rows, b.Cols, setting.cs.N())
     if err != nil {return}
     RBi_enc, err = EncryptMatrix(RBi_plain, setting)
     if err != nil {return}
@@ -156,24 +155,24 @@ func SampleRMatrices(a, b BigMatrix, setting Setting) (RAi_plain, RAi_enc, RBi_p
 }
 
 // step 3 of MMult
-func GetCti(MA, MB, RA, RAi, RBi BigMatrix, setting Setting, secret_key secret_key) (cti BigMatrix, MA_part, MB_part PartialMatrix, err error) {
-    prod1, err := MatEncRightMul(RA, RBi, setting.cs)
+func GetCti(MA, MB, RA, RAi, RBi gm.Matrix, setting Setting, secret_key secret_key) (cti gm.Matrix, MA_part, MB_part gm.Matrix, err error) { //todo: partial
+    prod1, err := RA.Multiply(RBi)
     if err != nil {
         return
     }
-    prod2, err := MatEncRightMul(MA, RBi, setting.cs)
+    prod2, err := MA.Multiply(RBi)
     if err != nil {
         return
     }
-    prod3, err := MatEncLeftMul(RAi, MB, setting.cs)
+    prod3, err := RAi.Multiply(MB)
     if err != nil {
         return
     }
-    sum2, err := MatEncAdd(prod2, prod3, setting.cs) //avoid extra calculation
+    sum2, err := prod2.Add(prod3)
     if err != nil {
         return
     }
-    cti, err = MatEncSub(prod1, sum2, setting.cs)
+    cti, err = prod1.Subtract(sum2)
     MA_part, err = PartialDecryptMatrix(MA, secret_key)
     MB_part, err = PartialDecryptMatrix(MB, secret_key)
     return
@@ -182,8 +181,8 @@ func GetCti(MA, MB, RA, RAi, RBi BigMatrix, setting Setting, secret_key secret_k
 // calculates how many instances of MMult is needed to get all H,
 // according to: n = ceil( log(matrix size) )
 // H^2^n being the highest order needed
-func NbrMMultInstances(m BigMatrix) int {
-    return int(math.Ceil(math.Log2(float64(m.cols))))
+func NbrMMultInstances(m gm.Matrix) int {
+    return int(math.Ceil(math.Log2(float64(m.Cols))))
 }
 
 // step 3f of CTest-diff
@@ -233,15 +232,19 @@ func SumMultiplication(values []*big.Int, setting Setting) (sum *big.Int, err er
 }
 
 // evaluate polynomial p at point x
-func EvalPoly(p BigMatrix, x uint64, mod *big.Int) *big.Int {
-    sum := new(big.Int).Set(p.At(0,0))
+func EvalPoly(p gm.Matrix, x uint64, mod *big.Int) *big.Int {
+    val, err := p.At(0,0)
+    if err != nil {panic(err)}
+    sum := new(big.Int).Set(val.(*big.Int))
     xb := new(big.Int).SetUint64(x)
     x_raised := new(big.Int).Set(xb)
     term := new(big.Int)
     for i := 1; ; i += 1 {
-        term.Mul(p.At(0,i), x_raised)
+        val, err := p.At(0,i)
+        if err != nil {panic(err)}
+        term.Mul(val.(*big.Int), x_raised)
         sum.Add(sum, term)
-        if i >= p.cols-1 {
+        if i >= p.Cols-1 {
             break
         }
         x_raised.Mul(x_raised, xb)
@@ -250,55 +253,69 @@ func EvalPoly(p BigMatrix, x uint64, mod *big.Int) *big.Int {
 }
 
 // polynomial multiplication
-func MultPoly(p1, p2 BigMatrix) BigMatrix {
-    l := p1.cols + p2.cols - 1
-    prod := make([]*big.Int, l)
+func MultPoly(p1, p2 gm.Matrix) gm.Matrix {
+    l := p1.Cols + p2.Cols - 1
+    prod := make([]interface{}, l)
     for i := 0; i < l; i += 1 {
         prod[i] = big.NewInt(0)
     }
-    for i := 0; i < p1.cols; i += 1 {
-        for j := 0; j < p2.cols; j += 1 {
-            prod[i+j].Add(prod[i+j], new(big.Int).Mul(p1.At(0,i), p2.At(0,j)))
+    for i := 0; i < p1.Cols; i += 1 {
+        for j := 0; j < p2.Cols; j += 1 {
+            val1, err := p1.At(0,i)
+            if err != nil {panic(err)}
+            val2, err := p2.At(0,j)
+            if err != nil {panic(err)}
+            prod[i+j] = new(big.Int).Add(prod[i+j].(*big.Int), new(big.Int).Mul(val1.(*big.Int), val2.(*big.Int)))
         }
     }
-    return NewBigMatrix(1, l, prod)
+    new_poly, err := gm.NewMatrix(1, l, prod, p1.Space)
+    if err != nil {panic(err)}
+    return new_poly
 }
 
-func PolyFromRoots(roots []uint64, mod *big.Int) BigMatrix {
+func PolyFromRoots(roots []uint64, mod *big.Int) gm.Matrix {
     n := new(big.Int)
     n.SetUint64(roots[0]).Neg(n)
-    poly := NewBigMatrix(1,2,[]*big.Int{n, big.NewInt(1)})
+    poly, err := gm.NewMatrix(1,2,[]interface{}{n, big.NewInt(1)}, gm.Bigint{})
+    if err != nil {panic(err)}
     for i := 1; i < len(roots); i += 1 {
         n = new(big.Int)
         n.SetUint64(roots[i]).Neg(n)
-        root := NewBigMatrix(1, 2, []*big.Int{n, big.NewInt(1)})
+        root, err := gm.NewMatrix(1, 2, []interface{}{n, big.NewInt(1)}, gm.Bigint{})
+        if err != nil {panic(err)}
         poly = MultPoly(poly, root)
     }
-    for _, val := range poly.values {
-        val.Mod(val, mod)
-    }
+    poly, err = poly.Apply(func(val interface{}) (interface{}, error) {
+        return new(big.Int).Mod(val.(*big.Int), mod), nil
+    })
+    if err != nil {panic(err)}
     return poly
 }
 
 // step 4 of TPSI-diff
-func Interpolation(vs, ps BigMatrix, setting Setting) BigMatrix {
+func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
 
     sample_max := setting.T * 3 + 4
     
     // calculate q
-    q_vals := make([]*big.Int, vs.cols)
+    q_vals := make([]interface{}, vs.Cols)
     for i := range q_vals {
-        q_vals[i] = new(big.Int).ModInverse(ps.At(0,i), setting.cs.N())
-        q_vals[i].Mul(q_vals[i], vs.At(0,i))
+        ps_val, err := ps.At(0,i)
+        if err != nil {panic(err)}
+        q_vals[i] = new(big.Int).ModInverse(ps_val.(*big.Int), setting.cs.N())
+        vs_val, err := vs.At(0,i)
+        q_vals[i] = new(big.Int).Mul(q_vals[i].(*big.Int), vs_val.(*big.Int))
     }
-    q := NewBigMatrix(1, vs.cols, q_vals)
-    relations := make([]BigMatrix, sample_max)
+    q, err := gm.NewMatrix(1, vs.Cols, q_vals, vs.Space)
+    if err != nil {panic(err)}
+    relations := make([]gm.Matrix, sample_max)
     x_pow := new(big.Int)
     coeff := new(big.Int)
     
     coeff_pos := 0
     for ; coeff_pos < sample_max; coeff_pos += 1 {
-        eq := NewBigMatrix(1, sample_max + 1, nil)
+        eq, err := gm.NewMatrix(1, sample_max + 1, nil, q.Space)
+        if err != nil {panic(err)}
         x := big.NewInt(int64(2*coeff_pos+1))
         x_pow = big.NewInt(1)
         
@@ -306,35 +323,55 @@ func Interpolation(vs, ps BigMatrix, setting Setting) BigMatrix {
         j := 0
         for ; j <= setting.T * 2 + 2; j += 1 { // length of V(x)
             coeff.Set(x_pow).Mod(coeff, setting.cs.N())
-            eq.At(0, j).Set(coeff)
+            eq.Set(0, j, new(big.Int).Set(coeff))
             x_pow.Mul(x_pow, x)
         }
         x_pow = big.NewInt(1)
         for ; j <= sample_max; j += 1 { // length of p'(x)
-            coeff.Mul(q.At(0, coeff_pos), x_pow).Neg(coeff).Mod(coeff, setting.cs.N())
-            eq.At(0, j).Set(coeff)
+            q_val, err := q.At(0, coeff_pos)
+            if err != nil {panic(err)}
+            coeff.Mul(q_val.(*big.Int), x_pow).Neg(coeff).Mod(coeff, setting.cs.N())
+            eq.Set(0, j, new(big.Int).Set(coeff))
             x_pow.Mul(x_pow, x)
         }
 
         // substitue previous coefficents
         for prev_coeff := 0; prev_coeff < coeff_pos; prev_coeff += 1 {
-            coeff = eq.At(0, prev_coeff)
-            crel := MatScaMul(relations[prev_coeff], coeff)
-            eq = MatAdd(eq, crel)
+            coeff_interface, err := eq.At(0, prev_coeff)
+            if err != nil {panic(err)}
+            coeff = coeff_interface.(*big.Int)
+            crel, err := relations[prev_coeff].MultiplyScalar(coeff)
+            if err != nil {panic(err)}
+            eq, err = eq.Add(crel)
+            if err != nil {panic(err)}
             eq.Set(0, prev_coeff, big.NewInt(0))
-            eq = MatMod(eq, setting.cs.N())
+            eq, err = eq.Apply(func(val interface{}) (interface{}, error) {
+                return new(big.Int).Mod(val.(*big.Int), setting.cs.N()), nil
+            })
+            if err != nil {panic(err)}
         }
         
         // if we get 0 = 0, we have all coefficients needed
-        if eq.At(0, coeff_pos).Cmp(big.NewInt(0)) == 0 {
+        is_zero, err := eq.At(0, coeff_pos)
+        if err != nil {panic(err)}
+        if is_zero.(*big.Int).Cmp(big.NewInt(0)) == 0 {
             break
         }
         
         // collect current coefficient
-        rel_row := NewBigMatrix(1, sample_max + 1, nil)
-        coeff_inv := new(big.Int).ModInverse(eq.At(0, coeff_pos), setting.cs.N())
-        for rem_coeff := coeff_pos + 1; rem_coeff < sample_max + 1; rem_coeff += 1 {
-            rel := new(big.Int).Neg(eq.At(0, rem_coeff))
+        rel_row, err := gm.NewMatrix(1, sample_max + 1, nil, eq.Space)
+        if err != nil {panic(err)}
+        this_coeff, err := eq.At(0, coeff_pos)
+        if err != nil {panic(err)}
+        coeff_inv := new(big.Int).ModInverse(this_coeff.(*big.Int), setting.cs.N())
+        rem_coeff := 0
+        for ; rem_coeff < coeff_pos + 1; rem_coeff += 1 {
+            rel_row.Set(0, rem_coeff, new(big.Int).SetInt64(0))
+        }
+        for ; rem_coeff < sample_max + 1; rem_coeff += 1 {
+            rem, err := eq.At(0, rem_coeff)
+            if err != nil {panic(err)}
+            rel := new(big.Int).Neg(rem.(*big.Int))
             rel.Mul(rel, coeff_inv).Mod(rel, setting.cs.N())
             rel_row.Set(0, rem_coeff, rel)
         }
@@ -342,42 +379,49 @@ func Interpolation(vs, ps BigMatrix, setting Setting) BigMatrix {
         relations[coeff_pos] = rel_row
     }
 
-    interpolated_coeffs := make([]*big.Int, sample_max + 1)
+    interpolated_coeffs := make([]interface{}, sample_max + 1)
     interpolated_coeffs[coeff_pos] = big.NewInt(1)
 
     // solve all coefficients from relations
     for solving_coeff := coeff_pos - 1; solving_coeff >= 0; solving_coeff -= 1 {
         coeff := big.NewInt(0)
         for known_coeff := solving_coeff + 1; known_coeff <= coeff_pos; known_coeff += 1 {
-            coeff.Add(coeff, new(big.Int).Mul(relations[solving_coeff].At(0, known_coeff), interpolated_coeffs[known_coeff])).Mod(coeff, setting.cs.N())
+            rel_s, err := relations[solving_coeff].At(0, known_coeff)
+            if err != nil {panic(err)}
+            coeff.Add(coeff, new(big.Int).Mul(rel_s.(*big.Int), interpolated_coeffs[known_coeff].(*big.Int))).Mod(coeff, setting.cs.N())
         }
         interpolated_coeffs[solving_coeff] = coeff
     }
 
     den := interpolated_coeffs[setting.T * 2 + 3:coeff_pos + 1]
-    return NewBigMatrix(1, len(den), den)
+    int_poly, err := gm.NewMatrix(1, len(den), den, q.Space) // todo save space locally and add to all
+    return int_poly
 }
 
-func IsRoot(poly BigMatrix, x uint64, mod *big.Int) bool {
+func IsRoot(poly gm.Matrix, x uint64, mod *big.Int) bool {
     return EvalPoly(poly, x, mod).Cmp(big.NewInt(0)) == 0
 }
 
-func RootMask(root_poly BigMatrix, setting Setting) (BigMatrix) {
+func RootMask(root_poly gm.Matrix, setting Setting) (gm.Matrix) {
     r, err := SampleInt(setting.cs.N())
     if err != nil {panic(err)}
-    random_root := NewBigMatrix(1, 2, []*big.Int{r, big.NewInt(1)})
+    random_root, err := gm.NewMatrix(1, 2, []interface{}{r, big.NewInt(1)}, root_poly.Space)
+    if err != nil {panic(err)}
     root_poly = MultPoly(root_poly, random_root)
     return root_poly
 }
 
-func EvalIntPolys(root_poly BigMatrix, sample_max int, setting Setting) (R_values_enc, R_tilde_values, p_values BigMatrix) {
+func EvalIntPolys(root_poly gm.Matrix, sample_max int, setting Setting) (R_values_enc, R_tilde_values, p_values gm.Matrix) {
     R, err := SampleMatrix(1, setting.T+1, setting.cs.N())
     if err != nil {panic(err)}
     R_tilde, err := SampleMatrix(1, setting.T+1, setting.cs.N())
     if err != nil {panic(err)}
-    R_values := NewBigMatrix(1, sample_max, nil)
-    R_tilde_values = NewBigMatrix(1, sample_max, nil)
-    p_values = NewBigMatrix(1, sample_max, nil)
+    R_values, err := gm.NewMatrix(1, sample_max, nil, gm.Bigint{})
+    if err != nil {panic(err)}
+    R_tilde_values, err = gm.NewMatrix(1, sample_max, nil, gm.Bigint{})
+    if err != nil {panic(err)}
+    p_values, err = gm.NewMatrix(1, sample_max, nil, gm.Bigint{})
+    if err != nil {panic(err)}
     for i := 0; i < sample_max; i += 1 {
         x := uint64(i*2+1)
         R_values.Set(0, i, EvalPoly(R, x, setting.cs.N()))
@@ -389,14 +433,19 @@ func EvalIntPolys(root_poly BigMatrix, sample_max int, setting Setting) (R_value
     return
 }
 
-func MaskRootPoly(p_values, party_values, R_tilde_values BigMatrix, sample_max int, setting Setting) BigMatrix {
-    v := NewBigMatrix(1, sample_max, nil)
+func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max int, setting Setting) gm.Matrix {
+    v, err := gm.NewMatrix(1, sample_max, nil, setting.eval_space)
+    if err != nil {panic(err)}
     R_tilde_values_enc, err := EncryptMatrix(R_tilde_values, setting)
     if err != nil {panic(err)}
-    all_masks, err := MatEncAdd(party_values, R_tilde_values_enc, setting.cs)
+    all_masks, err := party_values.Add(R_tilde_values_enc)
     if err != nil {panic(err)}
     for i := 0; i < sample_max; i += 1 {
-        val, err := setting.cs.MultiplyScalar(all_masks.At(0,i), p_values.At(0,i))
+        mask_val, err := all_masks.At(0,i)
+        if err != nil {panic(err)}
+        p_val, err := p_values.At(0,i)
+        if err != nil {panic(err)}
+        val, err := setting.cs.MultiplyScalar(mask_val.(*big.Int), p_val.(*big.Int))
         if err != nil {panic(err)}
         v.Set(0, i, val)
     }

@@ -3,6 +3,7 @@ package tpsi
 import (
     "testing"
     "math/big"
+    gm "github.com/ontanj/generic-matrix"
 )
 
 // create a slice of n chan interface{}
@@ -17,7 +18,8 @@ func create_chans(n int) []chan interface{} {
 func TestASSWorkers(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, sks, err := NewDJCryptosystem(512, 4)
+    pk, sks, eval_space, err := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     if err != nil {t.Error(err)}
     setting.cs = pk
     
@@ -49,7 +51,8 @@ func TestASSWorkers(t *testing.T) {
 func TestMultWorkers(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, sks, err := NewDJCryptosystem(512, 4)
+    pk, sks, eval_space, err := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     if err != nil {t.Error(err)}
     setting.cs = pk
     
@@ -90,7 +93,8 @@ func TestMultWorkers(t *testing.T) {
 func TestZeroTestWorkers(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, sks, err := NewDJCryptosystem(512, setting.n)
+    pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     if err != nil {panic(err)}
     setting.cs = pk
 
@@ -141,7 +145,8 @@ func TestZeroTestWorkers(t *testing.T) {
 func TestDecryptionWorkers(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, sks, err := NewDJCryptosystem(512, setting.n)
+    pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     if err != nil {panic(err)}
     setting.cs = pk
     
@@ -182,13 +187,15 @@ func t_decrypt(cipher *big.Int, sks []secret_key, setting Setting) *big.Int {
     return val
 }
 
-func t_decryptPoly(num, den BigMatrix, sks []secret_key, setting Setting) BigMatrix {
-    p := NewBigMatrix(1, num.cols, nil)
-    for i := 0; i < num.cols; i += 1 {
-        num_val := t_decrypt(num.At(0,i), sks, setting)
-        den_val := t_decrypt(den.At(0,i), sks, setting)
+func t_decryptPoly(num, den gm.Matrix, sks []secret_key, setting Setting) []*big.Int {
+    p := make([]*big.Int, num.Cols)
+    for i := 0; i < num.Cols; i += 1 {
+        num_enc, _ := num.At(0,i)
+        num_val := t_decrypt(num_enc.(*big.Int), sks, setting)
+        den_enc, _ := den.At(0,i)
+        den_val := t_decrypt(den_enc.(*big.Int), sks, setting)
         den_val.ModInverse(den_val, setting.cs.N())
-        p.Set(0,i, num_val.Mul(num_val, den_val).Mod(num_val, setting.cs.N()))
+        p[i] = num_val.Mul(num_val, den_val).Mod(num_val, setting.cs.N())
     }
     return p
 }
@@ -196,14 +203,17 @@ func t_decryptPoly(num, den BigMatrix, sks []secret_key, setting Setting) BigMat
 func TestPolynomialDivisionWorkers(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, sksdj, err := NewDJCryptosystem(512, setting.n)
+    pk, sksdj, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     sks := ConvertDJSKSlice(sksdj)
-    if err != nil {panic(err)}
+    if err != nil {t.Error(err)}
     setting.cs = pk
-    divid := NewBigMatrix(1, 5, sliceToBigInt([]int64{3, 6, 5, 2, 0}))
-    divis := NewBigMatrix(1, 4, sliceToBigInt([]int64{1, 3, 2, 0}))
-    q := sliceToBigInt([]int64{1, 1})
-    r := sliceToBigInt([]int64{2, 2})
+    divid, err := gm.NewMatrixFromInt(1, 5, []int{3, 6, 5, 2, 0})
+    if err != nil {t.Error(err)}
+    divis, err := gm.NewMatrixFromInt(1, 4, []int{1, 3, 2, 0})
+    if err != nil {t.Error(err)}
+    q := []int64{1, 1}
+    r := []int64{2, 2}
 
     divid_enc, err := EncryptMatrix(divid, setting)
     if err != nil {t.Error(err)}
@@ -216,42 +226,49 @@ func TestPolynomialDivisionWorkers(t *testing.T) {
 
     channels := create_chans(setting.n-1)
 
-    validator := func(num BigMatrix, den BigMatrix, corr []*big.Int) {
-        dec := make([]*big.Int, num.cols)
+    validator := func(num gm.Matrix, den gm.Matrix, corr []int64) {
+        dec := make([]*big.Int, num.Cols)
         var den_i *big.Int // denominator inverse
         
         // if denominator shared among all coefficients -> decrypt it
-        if den.cols == 1 {
-            den_i = t_decrypt(den.At(0, 0), sks, setting)
+        if den.Cols == 1 {
+            den_val, err := den.At(0, 0)
+            if err != nil {t.Error(err)}
+            den_i = t_decrypt(den_val.(*big.Int), sks, setting)
             den_i.ModInverse(den_i, setting.cs.N())
         }
         
         // iterate over coefficients
         for j := 0; j < len(corr); j += 1 {
             // decrypt current denominator if not shared
-            if den.cols != 1 {
-                den_i = t_decrypt(den.At(0, j), sks, setting)
+            if den.Cols != 1 {
+                den_val, err := den.At(0, j)
+                if err != nil {t.Error(err)}
+                den_i = t_decrypt(den_val.(*big.Int), sks, setting)
                 den_i.ModInverse(den_i, setting.cs.N())
             }
-            dec[j] = t_decrypt(num.At(0, j), sks, setting) // decrypt current numerator
+            num_val, err := num.At(0, j)
+            if err != nil {t.Error(err)}
+            dec[j] = t_decrypt(num_val.(*big.Int), sks, setting) // decrypt current numerator
             dec[j].Mul(dec[j], den_i).Mod(dec[j], setting.cs.N()) // multiply numerator and denominator inverse
-            if dec[j].Cmp(corr[j]) != 0 {
+            if dec[j].Cmp(new(big.Int).SetInt64(corr[j])) != 0 {
                 t.Errorf("error in polynomial division, expected %d got %d", corr[j], dec[j])
             }
         }
-        if den.cols > len(corr) {
+        if den.Cols > len(corr) {
             t.Error("exceeding coefficients")
         }
     }
 
-    returns := []chan BigMatrix{make(chan BigMatrix), make(chan BigMatrix, 4), make(chan BigMatrix, 4), make(chan BigMatrix)}
+    returns := []chan gm.Matrix{make(chan gm.Matrix), make(chan gm.Matrix, 4), make(chan gm.Matrix, 4), make(chan gm.Matrix)}
     
     go func() {
         qn, qd, rn, rd := PolynomialDivisionWorker(divid_enc, divis_enc, divid_den, divis_den, sks[setting.n-1], setting, channels, nil)
         returns[setting.n-1] <- qn
         returns[setting.n-1] <- qd
         returns[setting.n-1] <- rn
-        returns[setting.n-1] <- NewBigMatrix(1, 1, []*big.Int{rd})
+        rd_ret, _ := gm.NewMatrix(1, 1, []interface{}{rd}, gm.Bigint{})
+        returns[setting.n-1] <- rd_ret
     }()
     for i := 0; i < setting.n-1; i += 1 {
         go func(i int) {
@@ -259,7 +276,101 @@ func TestPolynomialDivisionWorkers(t *testing.T) {
             returns[i] <- qn
             returns[i] <- qd
             returns[i] <- rn
-            returns[i] <- NewBigMatrix(1, 1, []*big.Int{rd})
+            rd_ret, _ := gm.NewMatrix(1, 1, []interface{}{rd}, gm.Bigint{})
+            returns[i] <- rd_ret
+        }(i)
+    }
+    
+    qn := <-returns[0]
+    validator(qn, <-returns[0], q)
+    rn :=  <-returns[0]
+    validator(rn, <-returns[0], r)
+    qn = <-returns[3]
+    validator(qn, <-returns[3], q)
+    rn = <-returns[3]
+    validator(rn, <-returns[3], r)
+    
+}
+
+func TestAnotherPolynomialDivisionWorkers(t *testing.T) {
+    var setting Setting
+    setting.n = 4
+    pk, sksdj, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
+    sks := ConvertDJSKSlice(sksdj)
+    if err != nil {t.Error(err)}
+    setting.cs = pk
+    divid, err := gm.NewMatrixFromInt(1, 4, []int{51, -79, -125, 441})
+    if err != nil {t.Error(err)}
+    divis, err := gm.NewMatrixFromInt(1, 3, []int{-6375, -12616, 50464})
+    if err != nil {t.Error(err)}
+    q := []*big.Int{new(big.Int).Mod(new(big.Int).Mul(big.NewInt(-59), new(big.Int).ModInverse(big.NewInt(4), setting.cs.N())), setting.cs.N()), big.NewInt(441)}
+    r := []*big.Int{new(big.Int).Mod(new(big.Int).Mul(big.NewInt(9918531), new(big.Int).ModInverse(big.NewInt(201856), setting.cs.N())), setting.cs.N()),
+                    new(big.Int).Mod(new(big.Int).Mul(big.NewInt(-1361367), new(big.Int).ModInverse(big.NewInt(50464), setting.cs.N())), setting.cs.N())}
+
+    divid_enc, err := EncryptMatrix(divid, setting)
+    if err != nil {t.Error(err)}
+    divid_den, err := setting.cs.Encrypt(big.NewInt(1))
+    if err != nil {t.Error(err)}
+    divis_enc, err := EncryptMatrix(divis, setting)
+    if err != nil {t.Error(err)}
+    divis_den, err := setting.cs.Encrypt(big.NewInt(50464))
+    if err != nil {t.Error(err)}
+
+    channels := create_chans(setting.n-1)
+
+    validator := func(num gm.Matrix, den gm.Matrix, corr []*big.Int) {
+        dec := make([]*big.Int, num.Cols)
+        var den_i *big.Int // denominator inverse
+        
+        // if denominator shared among all coefficients -> decrypt it
+        if den.Cols == 1 {
+            den_val, err := den.At(0, 0)
+            if err != nil {t.Error(err)}
+            den_i = t_decrypt(den_val.(*big.Int), sks, setting)
+            den_i.ModInverse(den_i, setting.cs.N())
+        }
+        
+        // iterate over coefficients
+        for j := 0; j < len(corr); j += 1 {
+            // decrypt current denominator if not shared
+            if den.Cols != 1 {
+                den_val, err := den.At(0, j)
+                if err != nil {t.Error(err)}
+                den_i = t_decrypt(den_val.(*big.Int), sks, setting)
+                den_i.ModInverse(den_i, setting.cs.N())
+            }
+            num_val, err := num.At(0, j)
+            if err != nil {t.Error(err)}
+            dec[j] = t_decrypt(num_val.(*big.Int), sks, setting) // decrypt current numerator
+            dec[j].Mul(dec[j], den_i).Mod(dec[j], setting.cs.N()) // multiply numerator and denominator inverse
+            if dec[j].Cmp(corr[j]) != 0 {
+                t.Errorf("error in polynomial division, expected %d got %d", corr[j], dec[j])
+            }
+        }
+        if den.Cols > len(corr) {
+            t.Error("exceeding coefficients")
+        }
+    }
+
+    returns := []chan gm.Matrix{make(chan gm.Matrix), make(chan gm.Matrix, 4), make(chan gm.Matrix, 4), make(chan gm.Matrix)}
+    
+    go func() {
+        qn, qd, rn, rd := PolynomialDivisionWorker(divid_enc, divis_enc, divid_den, divis_den, sks[setting.n-1], setting, channels, nil)
+        returns[setting.n-1] <- qn
+        returns[setting.n-1] <- qd
+        returns[setting.n-1] <- rn
+        rd_ret, _ := gm.NewMatrix(1, 1, []interface{}{rd}, gm.Bigint{})
+        returns[setting.n-1] <- rd_ret
+    }()
+    for i := 0; i < setting.n-1; i += 1 {
+        go func(i int) {
+            qn, qd, rn, rd := PolynomialDivisionWorker(divid_enc, divis_enc, divid_den, divis_den, sks[i], setting, nil, channels[i])
+            returns[i] <- qn
+            returns[i] <- qd
+            returns[i] <- rn
+            rd_ret, _ := gm.NewMatrix(1, 1, []interface{}{rd}, gm.Bigint{})
+            returns[i] <- rd_ret
         }(i)
     }
     
@@ -277,26 +388,31 @@ func TestPolynomialDivisionWorkers(t *testing.T) {
 func TestEncryptedPolyMult(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, djsks, err := NewDJCryptosystem(512, 4)
+    pk, djsks, eval_space, err := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     sks := ConvertDJSKSlice(djsks)
     if err != nil {t.Error(err)}
     setting.cs = pk
 
-    a_num := NewBigMatrix(1, 3, sliceToBigInt([]int64{3, 9, 3}))
+    a_num, err := gm.NewMatrixFromInt(1, 3, []int{3, 9, 3})
+    if err != nil {t.Error(err)}
     a_num, err = EncryptMatrix(a_num, setting)
     if err != nil {t.Error(err)}
-    a_den := NewBigMatrix(1, 3, sliceToBigInt([]int64{1, 4, 2}))
+    a_den, err := gm.NewMatrixFromInt(1, 3, []int{1, 4, 2})
+    if err != nil {t.Error(err)}
     a_den, err = EncryptMatrix(a_den, setting)
     if err != nil {t.Error(err)}
 
-    b_num := NewBigMatrix(1, 2, sliceToBigInt([]int64{4, 4}))
+    b_num, err := gm.NewMatrixFromInt(1, 2, []int{4, 4})
+    if err != nil {t.Error(err)}
     b_num, err = EncryptMatrix(b_num, setting)
     if err != nil {t.Error(err)}
-    b_den := NewBigMatrix(1, 2, sliceToBigInt([]int64{3, 1}))
+    b_den, err := gm.NewMatrixFromInt(1, 2, []int{3, 1})
+    if err != nil {t.Error(err)}
     b_den, err = EncryptMatrix(b_den, setting)
     if err != nil {t.Error(err)}
-
-    corr := NewBigMatrix(1, 4, sliceToBigInt([]int64{4, 15, 11, 6}))
+    
+    corr := []int64{4, 15, 11, 6}
 
     channels := create_chans(setting.n-1)
     return_channel := make(chan int)
@@ -304,9 +420,9 @@ func TestEncryptedPolyMult(t *testing.T) {
         p_num, p_den, err := PolyMult(a_num, a_den, b_num, b_den, sks[setting.n-1], setting, channels, nil)
         if err != nil {t.Error(err)}
         p := t_decryptPoly(p_num, p_den, sks, setting)
-        for k := 0; k < corr.cols; k += 1 {
-            if p.At(0,k).Cmp(corr.At(0,k)) != 0 {
-                t.Errorf("non-matching value at %d, got %d expected %d", k, p.At(0,k), corr.At(0,k))
+        for k := 0; k < len(corr); k += 1 {
+            if p[k].Cmp(new(big.Int).SetInt64(corr[k])) != 0 {
+                t.Errorf("non-matching value at %d, got %d expected %d", k, p[k], corr[k])
             }
         }
         return_channel <- 0
@@ -316,9 +432,9 @@ func TestEncryptedPolyMult(t *testing.T) {
             p_num, p_den, err := PolyMult(a_num, a_den, b_num, b_den, sks[j], setting, nil, channels[j])
             if err != nil {t.Error(err)}
             p := t_decryptPoly(p_num, p_den, sks, setting)
-            for k := 0; k < corr.cols; k += 1 {
-                if p.At(0,k).Cmp(corr.At(0,k)) != 0 {
-                    t.Errorf("non-matching value at %d, expected %d got %d", k, corr.At(0,k), p.At(0,k))
+            for k := 0; k < len(corr); k += 1 {
+                if p[k].Cmp(new(big.Int).SetInt64(corr[k])) != 0 {
+                    t.Errorf("non-matching value at %d, expected %d got %d", k, corr[k], p[k])
                 }
             }
             return_channel <- 0
@@ -332,26 +448,31 @@ func TestEncryptedPolyMult(t *testing.T) {
 func TestPolySub(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, djsks, err := NewDJCryptosystem(512, 4)
+    pk, djsks, eval_space, err := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     sks := ConvertDJSKSlice(djsks)
     if err != nil {t.Error(err)}
     setting.cs = pk
 
-    a_num := NewBigMatrix(1, 2, sliceToBigInt([]int64{5, 4}))
+    a_num, err := gm.NewMatrixFromInt(1, 2, []int{5, 4})
+    if err != nil {t.Error(err)}
     a_num, err = EncryptMatrix(a_num, setting)
     if err != nil {t.Error(err)}
-    a_den := NewBigMatrix(1, 2, sliceToBigInt([]int64{2, 3}))
+    a_den, err := gm.NewMatrixFromInt(1, 2, []int{2, 3})
+    if err != nil {t.Error(err)}
     a_den, err = EncryptMatrix(a_den, setting)
     if err != nil {t.Error(err)}
 
-    b_num := NewBigMatrix(1, 2, sliceToBigInt([]int64{1, 2}))
+    b_num, err := gm.NewMatrixFromInt(1, 2, []int{1, 2})
+    if err != nil {t.Error(err)}
     b_num, err = EncryptMatrix(b_num, setting)
     if err != nil {t.Error(err)}
-    b_den := NewBigMatrix(1, 2, sliceToBigInt([]int64{2, 6}))
+    b_den, err := gm.NewMatrixFromInt(1, 2, []int{2, 6})
+    if err !=   nil {t.Error(err)}
     b_den, err = EncryptMatrix(b_den, setting)
     if err != nil {t.Error(err)}
 
-    corr := NewBigMatrix(1, 2, sliceToBigInt([]int64{2, 1}))
+    corr := []int64{2, 1}
 
     channels := create_chans(setting.n-1)
     return_channel := make(chan int)
@@ -359,9 +480,9 @@ func TestPolySub(t *testing.T) {
         p_num, p_den, err := PolySub(a_num, a_den, b_num, b_den, sks[setting.n-1], setting, channels, nil)
         if err != nil {t.Error(err)}
         p := t_decryptPoly(p_num, p_den, sks, setting)
-        for k := 0; k < corr.cols; k += 1 {
-            if p.At(0,k).Cmp(corr.At(0,k)) != 0 {
-                t.Errorf("non-matching value at %d, got %d expected %d", k, p.At(0,k), corr.At(0,k))
+        for k := 0; k < len(corr); k += 1 {
+            if p[k].Cmp(new(big.Int).SetInt64(corr[k])) != 0 {
+                t.Errorf("non-matching value at %d, got %d expected %d", k, p[k], corr[k])
             }
         }
         return_channel <- 0
@@ -371,9 +492,9 @@ func TestPolySub(t *testing.T) {
             p_num, p_den, err := PolySub(a_num, a_den, b_num, b_den, sks[j], setting, nil, channels[j])
             if err != nil {t.Error(err)}
             p := t_decryptPoly(p_num, p_den, sks, setting)
-            for k := 0; k < corr.cols; k += 1 {
-                if p.At(0,k).Cmp(corr.At(0,k)) != 0 {
-                    t.Errorf("non-matching value at %d, expected %d got %d", k, corr.At(0,k), p.At(0,k))
+            for k := 0; k < len(corr); k += 1 {
+                if p[k].Cmp(new(big.Int).SetInt64(corr[k])) != 0 {
+                    t.Errorf("non-matching value at %d, expected %d got %d", k, corr[k], p[k])
                 }
             }
             return_channel <- 0
@@ -387,18 +508,19 @@ func TestPolySub(t *testing.T) {
 func TestTDecryptPoly(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, djsks, _ := NewDJCryptosystem(512, 4)
+    pk, djsks, eval_space, _ := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     sks := ConvertDJSKSlice(djsks)
     setting.cs = pk
-    num := NewBigMatrix(1, 3, sliceToBigInt([]int64{6, 9, 4}))
+    num, _ := gm.NewMatrixFromInt(1, 3, []int{6, 9, 4})
     num, _ = EncryptMatrix(num, setting)
-    den := NewBigMatrix(1, 3, sliceToBigInt([]int64{3, 3, 2}))
+    den, _ := gm.NewMatrixFromInt(1, 3, []int{3, 3, 2})
     den, _ = EncryptMatrix(den, setting)
-    corr := NewBigMatrix(1, 3, sliceToBigInt([]int64{2, 3, 2}))
+    corr := []int64{2, 3, 2}
     dec := t_decryptPoly(num, den, sks, setting)
-    for i := 0; i < corr.cols; i += 1 {
-        if corr.At(0,i).Cmp(dec.At(0,i)) != 0 {
-            t.Errorf("error at %d, expected %d got %d", i, corr.At(0,i), dec.At(0,i))
+    for i := 0; i < len(corr); i += 1 {
+        if new(big.Int).SetInt64(corr[i]).Cmp(dec[i]) != 0 {
+            t.Errorf("error at %d, expected %d got %d", i, corr[i], dec[i])
         }
     }
 }
@@ -410,21 +532,23 @@ func t_negate(a int64, p *big.Int) *big.Int {
 func TestMinPolyWorker(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, djsks, err := NewDJCryptosystem(512, 4)
+    pk, djsks, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     sks := ConvertDJSKSlice(djsks)
     if err != nil {t.Error(err)}
     setting.cs = pk
-    seq := NewBigMatrix(1, 4, []*big.Int{big.NewInt(51), big.NewInt(-79), big.NewInt(-125), big.NewInt(441)})
+    seq, err := gm.NewMatrix(1, 4, []interface{}{big.NewInt(51), big.NewInt(-79), big.NewInt(-125), big.NewInt(441)}, gm.Bigint{})
+    if err != nil {t.Error(err)}
     seq, err = EncryptMatrix(seq, setting)
     if err != nil {t.Error(err)}
     rec_ord := 2
-    inv4 := big.NewInt(1).ModInverse(big.NewInt(4), setting.cs.N())
-    corr := NewBigMatrix(1, 3, []*big.Int{inv4, inv4, big.NewInt(1)})
+    inv4 := new(big.Int).ModInverse(big.NewInt(4), setting.cs.N())
+    corr := []*big.Int{inv4, inv4, big.NewInt(1)}
 
     channels := create_chans(setting.n-1)
-    returns := make([]chan BigMatrix, setting.n)
+    returns := make([]chan gm.Matrix, setting.n)
     for i := 0; i < setting.n; i += 1 {
-        returns[i] = make(chan BigMatrix, 2)
+        returns[i] = make(chan gm.Matrix, 2)
     }
 
     go func() {
@@ -439,50 +563,51 @@ func TestMinPolyWorker(t *testing.T) {
             returns[i] <- den
         }(i)
     }
-    for i := 0; i < 2; i += 1 {
+    for i := setting.n-2; i < setting.n; i += 1 {
         min_poly_num := <-returns[i]
         min_poly_den := <-returns[i]
         min_poly := t_decryptPoly(min_poly_num, min_poly_den, sks, setting)
         t_normalizePoly(min_poly, setting)
-        if corr.cols != min_poly.cols {
-            t.Errorf("min poly too long, expected %d got %d", corr.cols, min_poly.cols)
-            for j := 0; j < min_poly.cols; j += 1 {
-                t.Errorf("min poly coeff: %d\n", min_poly.At(0,j))
+        if len(corr) != len(min_poly) {
+            t.Errorf("min poly too long, expected %d got %d", len(corr), len(min_poly))
+            for j := 0; j < len(min_poly); j += 1 {
+                t.Errorf("min poly coeff: %d\n", min_poly[j])
             }
         } else {
-            for j := 0; j < corr.cols; j += 1 {
-                if min_poly.At(0,j).Cmp(corr.At(0,j)) != 0 {
-                    t.Errorf("wrong values in minpoly, expected %d got %d", corr.At(0,j), min_poly.At(0,j))
+            for j := 0; j < len(corr); j += 1 {
+                if min_poly[j].Cmp(corr[j]) != 0 {
+                    t.Errorf("wrong values in minpoly, expected %d got %d", corr[j], min_poly[j])
                 }
             }
         }
     }
 }
 
-func t_normalizePoly(poly BigMatrix, setting Setting) {
+func t_normalizePoly(poly []*big.Int, setting Setting) {
     inv := new(big.Int)
-    inv.ModInverse(poly.At(0,poly.cols-1), setting.cs.N())
-    for i := 0; i < poly.cols; i += 1 {
+    inv.ModInverse(poly[len(poly)-1], setting.cs.N())
+    for i := 0; i < len(poly); i += 1 {
         val := new(big.Int)
-        val.Mul(inv, poly.At(0, i)).Mod(val, setting.cs.N())
-        poly.Set(0, i, val)
+        val.Mul(inv, poly[i])
+        poly[i].Set(val).Mod(val, setting.cs.N())
     }
 }
 
 func TestMatrixMultiplicationWorker(t *testing.T) {
-    A := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 3, 4, 5, 6, 7, 8, 9}))
-    B := NewBigMatrix(3, 3, sliceToBigInt([]int64{1, 2, 1, 2, 1, 2, 1, 2, 1}))
-    AB_corr := MatMul(A, B)
+    A, _ := gm.NewMatrixFromInt(3, 3, []int{1, 2, 3, 4, 5, 6, 7, 8, 9})
+    B, _ := gm.NewMatrixFromInt(3, 3, []int{1, 2, 1, 2, 1, 2, 1, 2, 1})
+    AB_corr, _ := A.Multiply(B)
     var setting Setting
     setting.n = 4
-    pk, djsks, _ := NewDJCryptosystem(512, setting.n)
+    pk, djsks, eval_space, _ := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     sks := ConvertDJSKSlice(djsks)
     setting.cs = pk
     A, _ = EncryptMatrix(A, setting)
     B, _ = EncryptMatrix(B, setting)
 
     channels := create_chans(setting.n-1)
-    return_channel := make(chan BigMatrix)
+    return_channel := make(chan gm.Matrix)
 
     go func() {
         return_channel <- CentralMatrixMultiplicationWorker(A, B, sks[setting.n-1], setting, channels)
@@ -502,15 +627,17 @@ func TestMatrixMultiplicationWorker(t *testing.T) {
 func TestSingularityTestWorker(t *testing.T) {
     var setting Setting
     setting.n = 4
-    pk, sks, err := NewDJCryptosystem(512, 4)
+    pk, sks, eval_space, err := NewDJCryptosystem(4)
+    setting.eval_space = eval_space
     if err != nil {t.Error(err)}
     setting.cs = pk
 
     t.Run("singular matrix", func(t *testing.T) {
-        sing := NewBigMatrix(4, 4, sliceToBigInt([]int64{1, 2, 3, 5,
-                                                        4, 5, 6, 9,
-                                                        2, 4, 6, 10,
-                                                        7, 11, 15, 24}))
+        sing, err := gm.NewMatrixFromInt(4, 4, []int{1, 2, 3, 5,
+                                                4, 5, 6, 9,
+                                                2, 4, 6, 10,
+                                                7, 11, 15, 24})
+        if err != nil {t.Error(err)}
         sing, err = EncryptMatrix(sing, setting)
         if err != nil {t.Error(err)}
         channels := create_chans(setting.n-1)
@@ -533,10 +660,11 @@ func TestSingularityTestWorker(t *testing.T) {
     })
 
     t.Run("non-singular matrix", func(t *testing.T) {
-        non_sing := NewBigMatrix(4, 4, sliceToBigInt([]int64{1, 1, 0, 0,
-            2, 0, 1, 2,
-            0, 0, 1, 1,
-            1, 0, 1, 1}))
+        non_sing, err := gm.NewMatrixFromInt(4, 4, []int{1, 1, 0, 0,
+                                                    2, 0, 1, 2,
+                                                    0, 0, 1, 1,
+                                                    1, 0, 1, 1})
+        if err != nil {t.Error(err)}
         non_sing, err = EncryptMatrix(non_sing, setting)
         if err != nil {t.Error(err)}
         channels := create_chans(setting.n-1)
@@ -563,7 +691,8 @@ func TestCardinalityTestWorker(t *testing.T) {
     t.Run("below threshold", func (t *testing.T) {
         var setting Setting
         setting.n = 4
-        pk, sks, err := NewDJCryptosystem(512, setting.n)
+        pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
+        setting.eval_space = eval_space
         if err != nil {t.Error(err)}
         setting.cs = pk
         setting.T = 8
@@ -596,7 +725,8 @@ func TestCardinalityTestWorker(t *testing.T) {
     t.Run("above threshold", func (t *testing.T) {
         var setting Setting
         setting.n = 4
-        pk, sks, err := NewDJCryptosystem(512, setting.n)
+        pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
+        setting.eval_space = eval_space
         if err != nil {t.Error(err)}
         setting.cs = pk
         setting.T = 7
@@ -634,16 +764,17 @@ func TestIntersectionPoly(t *testing.T) {
                        []uint64{1,3,10,11}}
     var setting Setting
     setting.n = 4
-    pk, sks, err := NewDJCryptosystem(512, setting.n)
+    pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     if err != nil {t.Error(err)}
     setting.cs = pk
     setting.T = 8
-    roots := make([]BigMatrix, 4)
+    roots := make([]gm.Matrix, 4)
     for i := range items {
         roots[i] = PolyFromRoots(items[i], setting.cs.N())
     }
     channels := create_chans(setting.n)
-    ret := make(chan BigMatrix)
+    ret := make(chan gm.Matrix)
     go func() {
         vs, _ := CentralIntersectionPolyWorker(roots[setting.n-1], sks[setting.n-1], setting, channels)
         ret <- vs
@@ -658,12 +789,16 @@ func TestIntersectionPoly(t *testing.T) {
         v := <-ret
         j := 0
         for ; j < 2; j += 1 {
-            if v.At(0,j).Cmp(big.NewInt(0)) != 0 {
+            v_val, err := v.At(0,j)
+            if err != nil {t.Error(err)}
+            if v_val.(*big.Int).Cmp(big.NewInt(0)) != 0 {
                 t.Errorf("root lost at %d", j+1)
             }
         }
-        for ; j < v.cols; j += 1 {
-            if v.At(0,j).Cmp(big.NewInt(0)) == 0 {
+        for ; j < v.Cols; j += 1 {
+            v_val, err := v.At(0,j)
+            if err != nil {t.Error(err)}
+            if v_val.(*big.Int).Cmp(big.NewInt(0)) == 0 {
                 t.Errorf("additional root at %d", j+1)
             }
         }
@@ -681,7 +816,8 @@ func TestIntersection(t *testing.T) {
     no_shared := 2
     no_unique := 3
     setting.T = no_unique * setting.n
-    pk, sks, err := NewDJCryptosystem(512, setting.n)
+    pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     if err != nil {panic(err)}
     setting.cs = pk
     channels := create_chans(setting.n-1)
@@ -732,7 +868,8 @@ func TestTPSIdiff(t *testing.T) {
     items := [][]uint64{[]uint64{2,4,6,8,10,12,14},
                        []uint64{2,4,6,8,10,16,18},
                        []uint64{2,4,6,8,12,20,22}}
-    pk, sks, err := NewDJCryptosystem(512, setting.n)
+    pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
+    setting.eval_space = eval_space
     if err != nil {t.Error(err)}
     setting.cs = pk
     t.Run("pass cardinality test", func(t *testing.T) {
@@ -806,4 +943,36 @@ func TestTPSIdiff(t *testing.T) {
             }
         }
     })
+}
+
+func TestEncryptedZeroMatrix(t *testing.T) {
+    var setting Setting
+    setting.n = 4
+    pk, sks, es, _ := NewDJCryptosystem(setting.n)
+    setting.cs = pk
+    setting.eval_space = es
+    l := 4
+    randomizers := make([]*big.Int, l)
+    for i := range randomizers {
+        randomizers[i], _ = SampleInt(setting.cs.N())
+    }
+    m, _ := EncryptedFixedZeroMatrix(1, l, randomizers, setting)
+    channels := create_chans(setting.n-1)
+    ret := make(chan *big.Int)
+    for i := 0; i < m.Cols; i += 1 {
+        vi, _ := m.At(0, i)
+        v := vi.(*big.Int)
+        go func() {
+            u := CentralDecryptionWorker(v, sks[setting.n-1], setting, channels)
+            ret <- u
+        }()
+        for j := 0; j < setting.n-1; j += 1 {
+            go func(j int) {
+                OuterDecryptionWorker(v, sks[j], setting, channels[j])
+            }(j)
+        }
+        if (<-ret).Cmp(big.NewInt(0)) != 0 {
+            t.Error("zero matrix != 0")
+        }
+    }
 }

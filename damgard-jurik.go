@@ -3,7 +3,8 @@ package tpsi
 
 import (
 	"math/big"
-	"github.com/niclabs/tcpaillier"
+    "github.com/niclabs/tcpaillier"
+    gm "github.com/ontanj/generic-matrix"
 )
 
 type dj_pk struct {
@@ -68,13 +69,18 @@ type dj_ds struct {
     *tcpaillier.DecryptionShare
 }
 
-func NewDJCryptosystem(bitSize, n int) (cryptosystem dj_pk, secret_keys []dj_sk, err error) {
-    tcsks, tcpk, err := GenerateKeys(bitSize, 1, n)
+func NewDJCryptosystem(n int) (cryptosystem dj_pk, secret_keys []dj_sk, evaluation_space gm.Space, err error) {
+    return NewCustomDJCryptosystem(n, 512, 1)
+}
+
+func NewCustomDJCryptosystem(n, bitSize, s int) (cryptosystem dj_pk, secret_keys []dj_sk, evaluation_space gm.Space, err error) {
+    tcsks, tcpk, err := GenerateKeys(bitSize, s, n)
     if err != nil {return}
     cryptosystem = dj_pk{tcpk}
     secret_keys = make([]dj_sk, n)
     for i, tcsk := range tcsks {
         secret_keys[i] = dj_sk{tcsk}
     }
+    evaluation_space = gm.DJ_public_key{PubKey: tcpk}
     return
 }
