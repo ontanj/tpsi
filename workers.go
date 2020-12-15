@@ -236,17 +236,17 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den *big.Int, sk secret_k
     space := a.Space
     var la int // degree of dividend
     for la = a.Cols-1; la >= 0; la -= 1 { // find degree of divisor
-        zero_t, err := a.At(0,la)
+        zero_t, err := decodeBI(a.At(0,la))
         if err != nil {panic(err)}
-        if !zeroTest(zero_t.(*big.Int)) {
+        if !zeroTest(zero_t) {
             break
         }
     }
     var lb int // degree of divisor
     for lb = b.Cols-1; lb >= 0; lb -= 1 { // find degree of divisor
-        zero_t, err := b.At(0,lb)
+        zero_t, err := decodeBI(b.At(0,lb))
         if err != nil {panic(err)}
-        if !zeroTest(zero_t.(*big.Int)) {
+        if !zeroTest(zero_t) {
             break
         }
     }
@@ -260,33 +260,33 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den *big.Int, sk secret_k
 
     for i := la; i >= lb; i -= 1 { // start at highest degree coefficient, go until dividend smaller than divisor
         // skip 0 coefficents
-        zero_t, err := a_num.At(0,i)
+        zero_t, err := decodeBI(a_num.At(0,i))
         if err != nil {panic(err)}
-        if zeroTest(zero_t.(*big.Int)) {
+        if zeroTest(zero_t) {
             continue
         }
 
         pos := i-lb // entry in q at pos
 
         // q numerator: b_den * a_num
-        a_val, err := a_num.At(0, i)
+        a_val, err := decodeBI(a_num.At(0, i))
         if err != nil {panic(err)}
-        num := multiply(a_val.(*big.Int), b_den)
+        num := multiply(a_val, b_den)
         q_num.Set(0, pos, num)
 
         // q denominator: b_num * a_den
-        b_val, err := b.At(0, lb)
+        b_val, err := decodeBI(b.At(0, lb))
         if err != nil {panic(err)}
-        den := multiply(b_val.(*big.Int), a_den)
+        den := multiply(b_val, a_den)
         q_den.Set(0, pos, den)
 
         // p = q_val * b
         p_num, err := gm.NewMatrix(1, lb, nil, a.Space) // partial result, size is degree of (partial) dividend - 1 = i , skip highest coefficient as it is cancelling
         if err != nil {panic(err)}
         for j := 0; j < lb; j += 1 {
-            b_val, err := b.At(0, j)
+            b_val, err :=decodeBI( b.At(0, j))
             if err != nil {panic(err)}
-            val := multiply(num, b_val.(*big.Int))
+            val := multiply(num, b_val)
             p_num.Set(0, j, val)
         }
         p_den := multiply(den, b_den)
@@ -295,15 +295,15 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den *big.Int, sk secret_k
         r_num, err := gm.NewMatrix(1, i, nil, space)
         if err != nil {panic(err)}
         for i := 0; i < r_num.Cols; i += 1 {
-            a_val, err := a_num.At(0, i)
+            a_val, err := decodeBI(a_num.At(0, i))
             if err != nil {panic(err)}
-            val := multiply(a_val.(*big.Int), p_den)
+            val := multiply(a_val, p_den)
             r_num.Set(0, i, val)
         }
         for i := 0; i < p_num.Cols; i += 1 {
-            p_val, err := p_num.At(0, i)
+            p_val, err := decodeBI(p_num.At(0, i))
             if err != nil {panic(err)}
-            val := multiply(p_val.(*big.Int), a_den)
+            val := multiply(p_val, a_den)
             p_num.Set(0, i, val)
         }
         r_den := multiply(a_den, p_den)
@@ -320,9 +320,9 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den *big.Int, sk secret_k
     // remove initial zero coefficients
     var lr int
     for lr = a_num.Cols-1; lr >= 0; lr -=1 {
-        zero_t, err := a_num.At(0,lr)
+        zero_t, err := decodeBI(a_num.At(0,lr))
         if err != nil {panic(err)}
-        if !zeroTest(zero_t.(*big.Int)) {
+        if !zeroTest(zero_t) {
             break
         }
     }
@@ -354,13 +354,13 @@ func exchangeRandomizers(channels []chan interface{}, channel chan interface{}, 
 func divSub(r, p gm.Matrix, randomizers []*big.Int, setting Setting) gm.Matrix {
     pos_diff := r.Cols-p.Cols
     for i := 0; i < p.Cols; i += 1 {
-        p_val, err := p.At(0,i)
+        p_val, err := decodeBI(p.At(0,i))
         if err != nil {panic(err)}
-        neg, err := setting.cs.MultiplyScalarFixed(p_val.(*big.Int), big.NewInt(-1), randomizers[i])
+        neg, err := setting.cs.MultiplyScalarFixed(p_val, big.NewInt(-1), randomizers[i])
         if err != nil {panic(err)}
-        r_val, err := r.At(0, i+pos_diff)
+        r_val, err := decodeBI(r.At(0, i+pos_diff))
         if err != nil {panic(err)}
-        diff, err := setting.cs.Add(r_val.(*big.Int), neg)
+        diff, err := setting.cs.Add(r_val, neg)
         if err != nil {panic(err)}
         r.Set(0, i+pos_diff, diff)
     }
@@ -462,41 +462,41 @@ func PolySub(a_num, a_den, b_num, b_den gm.Matrix, sk secret_key, setting Settin
             var a_val interface{}
             a_val, err = a_num.At(0, i)
             if err != nil {return}
-            diff_num.Set(0, i, a_val.(*big.Int))
+            diff_num.Set(0, i, a_val)
             a_val, err = a_den.At(0, i)
             if err != nil {return}
-            diff_den.Set(0, i, a_val.(*big.Int))
+            diff_den.Set(0, i, a_val)
         } else if i >= a_num.Cols {
-            var b_val interface{}
-            b_val, err = b_num.At(0, i)
+            var b_val *big.Int
+            b_val, err = decodeBI(b_num.At(0, i))
             if err != nil {return}
-            num, err = setting.cs.MultiplyScalarFixed(b_val.(*big.Int), big.NewInt(-1), randomizers[i])
+            num, err = setting.cs.MultiplyScalarFixed(b_val, big.NewInt(-1), randomizers[i])
             if err != nil {return}
             diff_num.Set(0, i, num)
-            b_val, err = b_den.At(0, i)
+            b_val, err = decodeBI(b_den.At(0, i))
             if err != nil {return}
             diff_den.Set(0, i, b_val)
         } else {
-            var a_num_val interface{}
-            a_num_val, err = a_num.At(0, i)
+            var a_num_val *big.Int
+            a_num_val, err = decodeBI(a_num.At(0, i))
             if err != nil {return}
-            var b_den_val interface{}
-            b_den_val, err = b_den.At(0, i)
+            var b_den_val *big.Int
+            b_den_val, err = decodeBI(b_den.At(0, i))
             if err != nil {return}
-            long_a_num := multiply(a_num_val.(*big.Int), b_den_val.(*big.Int))
-            var b_num_val interface{}
-            b_num_val, err = b_num.At(0, i)
+            long_a_num := multiply(a_num_val, b_den_val)
+            var b_num_val *big.Int
+            b_num_val, err = decodeBI(b_num.At(0, i))
             if err != nil {return}
-            var a_den_val interface{}
-            a_den_val, err = a_den.At(0, i)
+            var a_den_val *big.Int
+            a_den_val, err = decodeBI(a_den.At(0, i))
             if err != nil {return}
-            long_b_num := multiply(b_num_val.(*big.Int), a_den_val.(*big.Int))
+            long_b_num := multiply(b_num_val, a_den_val)
             neg, err = setting.cs.MultiplyScalarFixed(long_b_num, big.NewInt(-1), randomizers[i])
             if err != nil {return}
             num, err = setting.cs.Add(long_a_num, neg)
             if err != nil {return}
             diff_num.Set(0, i, num)
-            den := multiply(a_den_val.(*big.Int), b_den_val.(*big.Int))
+            den := multiply(a_den_val, b_den_val)
             diff_den.Set(0, i, den)
         }
     }
@@ -520,35 +520,35 @@ func PolyMult(a_num, a_den, b_num, b_den gm.Matrix, sk secret_key, setting Setti
     var new_num *big.Int
     for i := 0; i < a_num.Cols; i += 1 {
         for j := 0; j < b_num.Cols; j += 1 {
-            var a_num_val interface{}
-            a_num_val, err = a_num.At(0,i)
+            var a_num_val *big.Int
+            a_num_val, err = decodeBI(a_num.At(0,i))
             if err != nil {return}
-            var b_num_val interface{}
-            b_num_val, err = b_num.At(0,j)
+            var b_num_val *big.Int
+            b_num_val, err = decodeBI(b_num.At(0,j))
             if err != nil {return}
-            num := multiply(a_num_val.(*big.Int), b_num_val.(*big.Int))
-            var current_num interface{}
-            current_num, err = prod_num.At(0, i+j)
-            if err != nil {return}
-            
-            var a_den_val interface{}
-            a_den_val, err = a_den.At(0,i)
-            if err != nil {return}
-            var b_den_val interface{}
-            b_den_val, err = b_den.At(0,j)
-            if err != nil {return}
-            den := multiply(a_den_val.(*big.Int), b_den_val.(*big.Int))
-            var current_den interface{}
-            current_den, err = prod_den.At(0, i+j)
+            num := multiply(a_num_val, b_num_val)
+            var current_num *big.Int
+            current_num, err = decodeBI(prod_num.At(0, i+j))
             if err != nil {return}
             
-            long_num := multiply(num, current_den.(*big.Int))
-            long_current_num := multiply(current_num.(*big.Int), den)
+            var a_den_val *big.Int
+            a_den_val, err = decodeBI(a_den.At(0,i))
+            if err != nil {return}
+            var b_den_val *big.Int
+            b_den_val, err = decodeBI(b_den.At(0,j))
+            if err != nil {return}
+            den := multiply(a_den_val, b_den_val)
+            var current_den *big.Int
+            current_den, err = decodeBI(prod_den.At(0, i+j))
+            if err != nil {return}
+            
+            long_num := multiply(num, current_den)
+            long_current_num := multiply(current_num, den)
             new_num, err = setting.cs.Add(long_num, long_current_num)
             if err != nil {return}
             prod_num.Set(0, i+j, new_num)
             
-            new_den := multiply(den, current_den.(*big.Int))
+            new_den := multiply(den, current_den)
             prod_den.Set(0, i+j, new_den)
         }
     }
@@ -697,9 +697,9 @@ func CentralSingularityTestWorker(m gm.Matrix, sk secret_key, setting Setting, c
     rec_ord := m.Cols
     min_poly, _ := MinPolyWorker(seq, rec_ord, sk, setting, channels, nil)
     
-    zero_t, err := min_poly.At(0,0)
+    zero_t, err := decodeBI(min_poly.At(0,0))
     if err != nil {panic(err)}
-    return CentralZeroTestWorker(zero_t.(*big.Int), sk, setting, channels)
+    return CentralZeroTestWorker(zero_t, sk, setting, channels)
 }
 
 // outputs true through return_channel if m is singular
@@ -730,9 +730,9 @@ func OuterSingularityTestWorker(m gm.Matrix, sk secret_key, setting Setting, cha
     rec_ord := m.Cols
     min_poly, _ := MinPolyWorker(seq, rec_ord, sk, setting, nil, channel)
 
-    zero_t, err := min_poly.At(0,0)
+    zero_t, err := decodeBI(min_poly.At(0,0))
     if err != nil {panic(err)}
-    return OuterZeroTestWorker(zero_t.(*big.Int), sk, setting, channel)
+    return OuterZeroTestWorker(zero_t, sk, setting, channel)
 }
 
 

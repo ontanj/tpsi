@@ -28,9 +28,9 @@ func TestHankelMatrix(t *testing.T) {
     t.Run("check elements", func(t *testing.T){
         for i := 0; i < 3; i += 1 {
             for j := 0; j < 3; j += 1 {
-                h_val, err := H.At(i,j)
+                h_val, err := decodeBI(H.At(i,j))
                 if err != nil {t.Error(err)}
-                if h_val.(*big.Int).Cmp(new(big.Int).SetInt64(H_corr[i*3 + j])) != 0 {
+                if h_val.Cmp(new(big.Int).SetInt64(H_corr[i*3 + j])) != 0 {
                     t.Error("incorrect values")
                 }
             }
@@ -111,11 +111,11 @@ func TestDecryptMatrix(t *testing.T) {
     }
     for i := 0; i < 3; i += 1 {
         for j := 0; j < 3; j += 1 {
-            dec_val, err := decrypted.At(i, j)
+            dec_val, err := decodeBI(decrypted.At(i, j))
             if err != nil {t.Error(err)}
-            a_val, err := a.At(i, j)
+            a_val, err := decodeBI(a.At(i, j))
             if err != nil {t.Error(err)}
-            if dec_val.(*big.Int).Cmp(a_val.(*big.Int)) != 0 {
+            if dec_val.Cmp(a_val) != 0 {
                 t.Error("values differ")
             }
         }
@@ -129,17 +129,17 @@ func CompareEnc(enc, plain gm.Matrix, sks []secret_key, setting Setting, t *test
         for j := 0; j < enc.Cols; j += 1 {
             decryptShares := make([]partial_decryption, len(sks))
             for k, sk := range sks {
-                enc_val, err := enc.At(i, j)
+                enc_val, err := decodeBI(enc.At(i, j))
                 if err != nil {t.Error(err)}
-                dks, err := sk.PartialDecrypt(enc_val.(*big.Int))
+                dks, err := sk.PartialDecrypt(enc_val)
                 if err != nil {t.Error(err)}
                 decryptShares[k] = dks
             }
             dec_plaintext, err := setting.cs.CombinePartials(decryptShares)
             if err != nil {t.Error(err)}
-            plain_val, err := plain.At(i,j)
+            plain_val, err := decodeBI(plain.At(i,j))
             if err != nil {t.Error(err)}
-            if dec_plaintext.Cmp(plain_val.(*big.Int)) != 0 {
+            if dec_plaintext.Cmp(plain_val) != 0 {
                 t.Errorf("decrypted values is wrong for (%d, %d), expected %d, got %d", i, j, plain_val, dec_plaintext)
             }
         }
@@ -307,9 +307,9 @@ func TestPolyMult(t *testing.T) {
         t.Errorf("length mismatch: expected %d, got %d", len(ab_corr), ab.Cols)
     }
     for i := 0; i < len(ab_corr); i += 1 {
-        ab_val, err := ab.At(0,i)
+        ab_val, err := decodeBI(ab.At(0,i))
         if err != nil {t.Error(err)}
-        if new(big.Int).SetInt64(ab_corr[i]).Cmp(ab_val.(*big.Int)) != 0 {
+        if new(big.Int).SetInt64(ab_corr[i]).Cmp(ab_val) != 0 {
             t.Errorf("error at %d: expected %d, got %d", i, ab_corr[i], ab_val)
         }
     }
@@ -324,9 +324,9 @@ func TestPolyFromRoots(t *testing.T) {
         t.Errorf("length mismatch: expected %d, got %d", len(poly), rpol.Cols)
     }
     for i := 0; i < len(poly); i += 1 {
-        rpol_val, err := rpol.At(0,i)
+        rpol_val, err := decodeBI(rpol.At(0,i))
         if err != nil {t.Error(err)}
-        if new(big.Int).SetInt64(poly[i]).Cmp(rpol_val.(*big.Int)) != 0 {
+        if new(big.Int).SetInt64(poly[i]).Cmp(rpol_val) != 0 {
             t.Errorf("error at %d: expected %d, got %d", i, poly[i], rpol_val)
         }
     }
@@ -350,10 +350,10 @@ func TestInterpolation(t *testing.T) {
         t.Errorf("wrong degree on interpolated polynomial; expected %d, got %d", len(p_corr), p.Cols)
     } else {
         for i, p_coeff := range p_corr {
-            p_val, err := p.At(0,i)
+            p_val, err := decodeBI(p.At(0,i))
             if err != nil {t.Error(err)}
-            if new(big.Int).SetInt64(p_coeff).Cmp(p_val.(*big.Int)) != 0 {
-                t.Errorf("expected %d, got %d", p_coeff, p_val.(*big.Int))
+            if new(big.Int).SetInt64(p_coeff).Cmp(p_val) != 0 {
+                t.Errorf("expected %d, got %d", p_coeff, p_val)
             }
         }
     }

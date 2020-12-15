@@ -190,10 +190,10 @@ func t_decrypt(cipher *big.Int, sks []secret_key, setting Setting) *big.Int {
 func t_decryptPoly(num, den gm.Matrix, sks []secret_key, setting Setting) []*big.Int {
     p := make([]*big.Int, num.Cols)
     for i := 0; i < num.Cols; i += 1 {
-        num_enc, _ := num.At(0,i)
-        num_val := t_decrypt(num_enc.(*big.Int), sks, setting)
-        den_enc, _ := den.At(0,i)
-        den_val := t_decrypt(den_enc.(*big.Int), sks, setting)
+        num_enc, _ := decodeBI(num.At(0,i))
+        num_val := t_decrypt(num_enc, sks, setting)
+        den_enc, _ := decodeBI(den.At(0,i))
+        den_val := t_decrypt(den_enc, sks, setting)
         den_val.ModInverse(den_val, setting.cs.N())
         p[i] = num_val.Mul(num_val, den_val).Mod(num_val, setting.cs.N())
     }
@@ -232,9 +232,9 @@ func TestPolynomialDivisionWorkers(t *testing.T) {
         
         // if denominator shared among all coefficients -> decrypt it
         if den.Cols == 1 {
-            den_val, err := den.At(0, 0)
+            den_val, err := decodeBI(den.At(0, 0))
             if err != nil {t.Error(err)}
-            den_i = t_decrypt(den_val.(*big.Int), sks, setting)
+            den_i = t_decrypt(den_val, sks, setting)
             den_i.ModInverse(den_i, setting.cs.N())
         }
         
@@ -242,14 +242,14 @@ func TestPolynomialDivisionWorkers(t *testing.T) {
         for j := 0; j < len(corr); j += 1 {
             // decrypt current denominator if not shared
             if den.Cols != 1 {
-                den_val, err := den.At(0, j)
+                den_val, err := decodeBI(den.At(0, j))
                 if err != nil {t.Error(err)}
-                den_i = t_decrypt(den_val.(*big.Int), sks, setting)
+                den_i = t_decrypt(den_val, sks, setting)
                 den_i.ModInverse(den_i, setting.cs.N())
             }
-            num_val, err := num.At(0, j)
+            num_val, err := decodeBI(num.At(0, j))
             if err != nil {t.Error(err)}
-            dec[j] = t_decrypt(num_val.(*big.Int), sks, setting) // decrypt current numerator
+            dec[j] = t_decrypt(num_val, sks, setting) // decrypt current numerator
             dec[j].Mul(dec[j], den_i).Mod(dec[j], setting.cs.N()) // multiply numerator and denominator inverse
             if dec[j].Cmp(new(big.Int).SetInt64(corr[j])) != 0 {
                 t.Errorf("error in polynomial division, expected %d got %d", corr[j], dec[j])
@@ -325,9 +325,9 @@ func TestAnotherPolynomialDivisionWorkers(t *testing.T) {
         
         // if denominator shared among all coefficients -> decrypt it
         if den.Cols == 1 {
-            den_val, err := den.At(0, 0)
+            den_val, err := decodeBI(den.At(0, 0))
             if err != nil {t.Error(err)}
-            den_i = t_decrypt(den_val.(*big.Int), sks, setting)
+            den_i = t_decrypt(den_val, sks, setting)
             den_i.ModInverse(den_i, setting.cs.N())
         }
         
@@ -335,14 +335,14 @@ func TestAnotherPolynomialDivisionWorkers(t *testing.T) {
         for j := 0; j < len(corr); j += 1 {
             // decrypt current denominator if not shared
             if den.Cols != 1 {
-                den_val, err := den.At(0, j)
+                den_val, err := decodeBI(den.At(0, j))
                 if err != nil {t.Error(err)}
-                den_i = t_decrypt(den_val.(*big.Int), sks, setting)
+                den_i = t_decrypt(den_val, sks, setting)
                 den_i.ModInverse(den_i, setting.cs.N())
             }
-            num_val, err := num.At(0, j)
+            num_val, err := decodeBI(num.At(0, j))
             if err != nil {t.Error(err)}
-            dec[j] = t_decrypt(num_val.(*big.Int), sks, setting) // decrypt current numerator
+            dec[j] = t_decrypt(num_val, sks, setting) // decrypt current numerator
             dec[j].Mul(dec[j], den_i).Mod(dec[j], setting.cs.N()) // multiply numerator and denominator inverse
             if dec[j].Cmp(corr[j]) != 0 {
                 t.Errorf("error in polynomial division, expected %d got %d", corr[j], dec[j])
@@ -789,16 +789,16 @@ func TestIntersectionPoly(t *testing.T) {
         v := <-ret
         j := 0
         for ; j < 2; j += 1 {
-            v_val, err := v.At(0,j)
+            v_val, err := decodeBI(v.At(0,j))
             if err != nil {t.Error(err)}
-            if v_val.(*big.Int).Cmp(big.NewInt(0)) != 0 {
+            if v_val.Cmp(big.NewInt(0)) != 0 {
                 t.Errorf("root lost at %d", j+1)
             }
         }
         for ; j < v.Cols; j += 1 {
-            v_val, err := v.At(0,j)
+            v_val, err := decodeBI(v.At(0,j))
             if err != nil {t.Error(err)}
-            if v_val.(*big.Int).Cmp(big.NewInt(0)) == 0 {
+            if v_val.Cmp(big.NewInt(0)) == 0 {
                 t.Errorf("additional root at %d", j+1)
             }
         }
@@ -960,8 +960,7 @@ func TestEncryptedZeroMatrix(t *testing.T) {
     channels := create_chans(setting.n-1)
     ret := make(chan *big.Int)
     for i := 0; i < m.Cols; i += 1 {
-        vi, _ := m.At(0, i)
-        v := vi.(*big.Int)
+        v, _ := decodeBI(m.At(0, i))
         go func() {
             u := CentralDecryptionWorker(v, sks[setting.n-1], setting, channels)
             ret <- u

@@ -30,9 +30,9 @@ func TestCPHankelMatrix(t *testing.T) {
         k := 0
         for i := 0; i < 3; i += 1 {
             for j := 0; j < 3; j += 1 {
-                h_val, err := H.At(i,j)
+                h_val, err := decodeBI(H.At(i,j))
                 if err != nil {t.Error(err)}
-                val := t_decrypt(h_val.(*big.Int), sks, setting)
+                val := t_decrypt(h_val, sks, setting)
                 if val.Cmp(new(big.Int).SetInt64(H_corr[k])) != 0 {
                     t.Error("incorrect values")
                 }

@@ -233,16 +233,16 @@ func SumMultiplication(values []*big.Int, setting Setting) (sum *big.Int, err er
 
 // evaluate polynomial p at point x
 func EvalPoly(p gm.Matrix, x uint64, mod *big.Int) *big.Int {
-    val, err := p.At(0,0)
+    val, err := decodeBI(p.At(0,0))
     if err != nil {panic(err)}
-    sum := new(big.Int).Set(val.(*big.Int))
+    sum := new(big.Int).Set(val)
     xb := new(big.Int).SetUint64(x)
     x_raised := new(big.Int).Set(xb)
     term := new(big.Int)
     for i := 1; ; i += 1 {
-        val, err := p.At(0,i)
+        val, err := decodeBI(p.At(0,i))
         if err != nil {panic(err)}
-        term.Mul(val.(*big.Int), x_raised)
+        term.Mul(val, x_raised)
         sum.Add(sum, term)
         if i >= p.Cols-1 {
             break
@@ -261,11 +261,11 @@ func MultPoly(p1, p2 gm.Matrix) gm.Matrix {
     }
     for i := 0; i < p1.Cols; i += 1 {
         for j := 0; j < p2.Cols; j += 1 {
-            val1, err := p1.At(0,i)
+            val1, err := decodeBI(p1.At(0,i))
             if err != nil {panic(err)}
-            val2, err := p2.At(0,j)
+            val2, err := decodeBI(p2.At(0,j))
             if err != nil {panic(err)}
-            prod[i+j] = new(big.Int).Add(prod[i+j].(*big.Int), new(big.Int).Mul(val1.(*big.Int), val2.(*big.Int)))
+            prod[i+j].(*big.Int).Add(prod[i+j].(*big.Int), new(big.Int).Mul(val1, val2))
         }
     }
     new_poly, err := gm.NewMatrix(1, l, prod, p1.Space)
@@ -300,11 +300,11 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
     // calculate q
     q_vals := make([]interface{}, vs.Cols)
     for i := range q_vals {
-        ps_val, err := ps.At(0,i)
+        ps_val, err := decodeBI(ps.At(0,i))
         if err != nil {panic(err)}
-        q_vals[i] = new(big.Int).ModInverse(ps_val.(*big.Int), setting.cs.N())
-        vs_val, err := vs.At(0,i)
-        q_vals[i] = new(big.Int).Mul(q_vals[i].(*big.Int), vs_val.(*big.Int))
+        current_q := new(big.Int).ModInverse(ps_val, setting.cs.N())
+        vs_val, err := decodeBI(vs.At(0,i))
+        q_vals[i] = current_q.Mul(current_q, vs_val)
     }
     q, err := gm.NewMatrix(1, vs.Cols, q_vals, vs.Space)
     if err != nil {panic(err)}
@@ -328,18 +328,16 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         }
         x_pow = big.NewInt(1)
         for ; j <= sample_max; j += 1 { // length of p'(x)
-            q_val, err := q.At(0, coeff_pos)
+            q_val, err := decodeBI(q.At(0, coeff_pos))
             if err != nil {panic(err)}
-            coeff.Mul(q_val.(*big.Int), x_pow).Neg(coeff).Mod(coeff, setting.cs.N())
+            coeff.Mul(q_val, x_pow).Neg(coeff).Mod(coeff, setting.cs.N())
             eq.Set(0, j, new(big.Int).Set(coeff))
             x_pow.Mul(x_pow, x)
         }
 
         // substitue previous coefficents
         for prev_coeff := 0; prev_coeff < coeff_pos; prev_coeff += 1 {
-            coeff_interface, err := eq.At(0, prev_coeff)
-            if err != nil {panic(err)}
-            coeff = coeff_interface.(*big.Int)
+            coeff, err := decodeBI(eq.At(0, prev_coeff))
             crel, err := relations[prev_coeff].MultiplyScalar(coeff)
             if err != nil {panic(err)}
             eq, err = eq.Add(crel)
@@ -352,26 +350,26 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         }
         
         // if we get 0 = 0, we have all coefficients needed
-        is_zero, err := eq.At(0, coeff_pos)
+        is_zero, err := decodeBI(eq.At(0, coeff_pos))
         if err != nil {panic(err)}
-        if is_zero.(*big.Int).Cmp(big.NewInt(0)) == 0 {
+        if is_zero.Cmp(big.NewInt(0)) == 0 {
             break
         }
         
         // collect current coefficient
         rel_row, err := gm.NewMatrix(1, sample_max + 1, nil, eq.Space)
         if err != nil {panic(err)}
-        this_coeff, err := eq.At(0, coeff_pos)
+        this_coeff, err := decodeBI(eq.At(0, coeff_pos))
         if err != nil {panic(err)}
-        coeff_inv := new(big.Int).ModInverse(this_coeff.(*big.Int), setting.cs.N())
+        coeff_inv := new(big.Int).ModInverse(this_coeff, setting.cs.N())
         rem_coeff := 0
         for ; rem_coeff < coeff_pos + 1; rem_coeff += 1 {
             rel_row.Set(0, rem_coeff, new(big.Int).SetInt64(0))
         }
         for ; rem_coeff < sample_max + 1; rem_coeff += 1 {
-            rem, err := eq.At(0, rem_coeff)
+            rem, err := decodeBI(eq.At(0, rem_coeff))
             if err != nil {panic(err)}
-            rel := new(big.Int).Neg(rem.(*big.Int))
+            rel := new(big.Int).Neg(rem)
             rel.Mul(rel, coeff_inv).Mod(rel, setting.cs.N())
             rel_row.Set(0, rem_coeff, rel)
         }
@@ -386,9 +384,9 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
     for solving_coeff := coeff_pos - 1; solving_coeff >= 0; solving_coeff -= 1 {
         coeff := big.NewInt(0)
         for known_coeff := solving_coeff + 1; known_coeff <= coeff_pos; known_coeff += 1 {
-            rel_s, err := relations[solving_coeff].At(0, known_coeff)
+            rel_s, err := decodeBI(relations[solving_coeff].At(0, known_coeff))
             if err != nil {panic(err)}
-            coeff.Add(coeff, new(big.Int).Mul(rel_s.(*big.Int), interpolated_coeffs[known_coeff].(*big.Int))).Mod(coeff, setting.cs.N())
+            coeff.Add(coeff, new(big.Int).Mul(rel_s, interpolated_coeffs[known_coeff].(*big.Int))).Mod(coeff, setting.cs.N())
         }
         interpolated_coeffs[solving_coeff] = coeff
     }
@@ -441,13 +439,18 @@ func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max i
     all_masks, err := party_values.Add(R_tilde_values_enc)
     if err != nil {panic(err)}
     for i := 0; i < sample_max; i += 1 {
-        mask_val, err := all_masks.At(0,i)
+        mask_val, err := decodeBI(all_masks.At(0,i))
         if err != nil {panic(err)}
-        p_val, err := p_values.At(0,i)
+        p_val, err := decodeBI(p_values.At(0,i))
         if err != nil {panic(err)}
-        val, err := setting.cs.MultiplyScalar(mask_val.(*big.Int), p_val.(*big.Int))
+        val, err := setting.cs.MultiplyScalar(mask_val, p_val)
         if err != nil {panic(err)}
         v.Set(0, i, val)
     }
     return v
+}
+
+func decodeBI(val interface{}, err error) (*big.Int, error) {
+    if err != nil {return nil, err}
+    return val.(*big.Int), nil
 }
