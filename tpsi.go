@@ -7,15 +7,14 @@ import (
 )
 
 type Setting struct {
-    cs cryptosystem
-    eval_space gm.Space
+    cs AHE_Cryptosystem
     n int // number of participants
     m int // set size
     T int // threshold
 }
 
 type PartialMatrix struct {
-    values []partial_decryption
+    values []Partial_decryption
     rows, cols int
 }
 
@@ -83,19 +82,14 @@ func EncryptMatrix(a gm.Matrix, setting Setting) (b gm.Matrix, err error) {
         return setting.cs.Encrypt(plain.(*big.Int))
     })
     if err != nil {return}
-    m.Space = setting.eval_space
+    m.Space = setting.cs.EvaluationSpace()
     return m, nil
 }
 
-// perform partial decryption for key share secret_key
-func PartialDecryptValue(cipher *big.Int, secret_key secret_key) (partial_decryption, error) {
-    return secret_key.PartialDecrypt(cipher)
-}
-
-// perform partial decryption for key share secret_key
-func PartialDecryptMatrix(cipher gm.Matrix, secret_key secret_key) (part_mat gm.Matrix, err error) { //todo: wrap in PartialMatrix?
+// perform partial decryption for key share Secret_key
+func PartialDecryptMatrix(cipher gm.Matrix, Secret_key Secret_key) (part_mat gm.Matrix, err error) { //todo: wrap in PartialMatrix?
     return cipher.Apply(func(plain interface{}) (enc interface{}, err error) {
-        return secret_key.PartialDecrypt(plain.(*big.Int))
+        return Secret_key.PartialDecrypt(plain.(*big.Int))
     })
 }
 
@@ -106,7 +100,7 @@ func CombineMatrixShares(part_mat []gm.Matrix, setting Setting) (decrypted gm.Ma
     var dec *big.Int
     for row := 0; row < part_mat[0].Rows; row += 1 {
         for col := 0; col < part_mat[0].Cols; col += 1 {
-            el_vals := make([]partial_decryption, len(part_mat))
+            el_vals := make([]Partial_decryption, len(part_mat))
             for j := range part_mat {
                 el_vals[j], err = part_mat[j].At(row, col)
                 if err != nil {return}
@@ -155,7 +149,7 @@ func SampleRMatrices(a, b gm.Matrix, setting Setting) (RAi_plain, RAi_enc, RBi_p
 }
 
 // step 3 of MMult
-func GetCti(MA, MB, RA, RAi, RBi gm.Matrix, setting Setting, secret_key secret_key) (cti gm.Matrix, MA_part, MB_part gm.Matrix, err error) { //todo: partial
+func GetCti(MA, MB, RA, RAi, RBi gm.Matrix, setting Setting, Secret_key Secret_key) (cti gm.Matrix, MA_part, MB_part gm.Matrix, err error) { //todo: partial
     prod1, err := RA.Multiply(RBi)
     if err != nil {
         return
@@ -173,8 +167,8 @@ func GetCti(MA, MB, RA, RAi, RBi gm.Matrix, setting Setting, secret_key secret_k
         return
     }
     cti, err = prod1.Subtract(sum2)
-    MA_part, err = PartialDecryptMatrix(MA, secret_key)
-    MB_part, err = PartialDecryptMatrix(MB, secret_key)
+    MA_part, err = PartialDecryptMatrix(MA, Secret_key)
+    MB_part, err = PartialDecryptMatrix(MB, Secret_key)
     return
 }
 
@@ -193,7 +187,7 @@ func SampleHMasks(setting Setting) {
 //Additive Secret Sharing
 
 //ASS, step 1
-func GetRandomEncrypted(setting Setting) (plain, cipher *big.Int, err error) {
+func GetRandomEncrypted(setting Setting) (plain *big.Int, cipher Ciphertext, err error) {
     plain, err = SampleInt(setting.cs.N())
     if err != nil {return}
     cipher, err = setting.cs.Encrypt(plain)
@@ -201,12 +195,12 @@ func GetRandomEncrypted(setting Setting) (plain, cipher *big.Int, err error) {
 }
 
 //ASS, step 5 & 6
-func SumMasksDecrypt(a *big.Int, ds []*big.Int, sk secret_key, setting Setting) (e_partial partial_decryption, err error) {
+func SumMasksDecrypt(a Ciphertext, ds []Ciphertext, sk Secret_key, setting Setting) (e_partial Partial_decryption, err error) {
     for _, val := range ds {
         a, err = setting.cs.Add(a, val)
         if err != nil {return}
     }
-    return PartialDecryptValue(a, sk)
+    return sk.PartialDecrypt(a)
 }
 
 //ASS, step 7
@@ -219,15 +213,13 @@ func NegateValue(d *big.Int, setting Setting) *big.Int {
 
 //Multiplication
 
-//Mult, step 2
-func MultiplyEncrypted(encrypted, plain *big.Int, setting Setting) (*big.Int, error) {
-    prod, err := setting.cs.MultiplyScalar(encrypted, plain)
-    return prod, err
-}
-
 //Mult, step 6
-func SumMultiplication(values []*big.Int, setting Setting) (sum *big.Int, err error) {
-    sum, err = setting.cs.Add(values...)
+func SumSlice(values []Ciphertext, setting Setting) (sum Ciphertext, err error) {
+    sum = values[0]
+    for i := 1; i < setting.n; i += 1 {
+        sum, err = setting.cs.Add(sum, values[i])
+        if err != nil {return}
+    }
     return
 }
 
@@ -296,6 +288,7 @@ func PolyFromRoots(roots []uint64, mod *big.Int) gm.Matrix {
 func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
 
     sample_max := setting.T * 3 + 4
+    space := gm.Bigint{}
     
     // calculate q
     q_vals := make([]interface{}, vs.Cols)
@@ -306,7 +299,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         vs_val, err := decodeBI(vs.At(0,i))
         q_vals[i] = current_q.Mul(current_q, vs_val)
     }
-    q, err := gm.NewMatrix(1, vs.Cols, q_vals, vs.Space)
+    q, err := gm.NewMatrix(1, vs.Cols, q_vals, space)
     if err != nil {panic(err)}
     relations := make([]gm.Matrix, sample_max)
     x_pow := new(big.Int)
@@ -314,7 +307,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
     
     coeff_pos := 0
     for ; coeff_pos < sample_max; coeff_pos += 1 {
-        eq, err := gm.NewMatrix(1, sample_max + 1, nil, q.Space)
+        eq, err := gm.NewMatrix(1, sample_max + 1, nil, space)
         if err != nil {panic(err)}
         x := big.NewInt(int64(2*coeff_pos+1))
         x_pow = big.NewInt(1)
@@ -338,7 +331,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         // substitue previous coefficents
         for prev_coeff := 0; prev_coeff < coeff_pos; prev_coeff += 1 {
             coeff, err := decodeBI(eq.At(0, prev_coeff))
-            crel, err := relations[prev_coeff].MultiplyScalar(coeff)
+            crel, err := relations[prev_coeff].Scale(coeff)
             if err != nil {panic(err)}
             eq, err = eq.Add(crel)
             if err != nil {panic(err)}
@@ -357,7 +350,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         }
         
         // collect current coefficient
-        rel_row, err := gm.NewMatrix(1, sample_max + 1, nil, eq.Space)
+        rel_row, err := gm.NewMatrix(1, sample_max + 1, nil, space)
         if err != nil {panic(err)}
         this_coeff, err := decodeBI(eq.At(0, coeff_pos))
         if err != nil {panic(err)}
@@ -392,7 +385,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
     }
 
     den := interpolated_coeffs[setting.T * 2 + 3:coeff_pos + 1]
-    int_poly, err := gm.NewMatrix(1, len(den), den, q.Space) // todo save space locally and add to all
+    int_poly, err := gm.NewMatrix(1, len(den), den, space) 
     return int_poly
 }
 
@@ -432,7 +425,7 @@ func EvalIntPolys(root_poly gm.Matrix, sample_max int, setting Setting) (R_value
 }
 
 func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max int, setting Setting) gm.Matrix {
-    v, err := gm.NewMatrix(1, sample_max, nil, setting.eval_space)
+    v, err := gm.NewMatrix(1, sample_max, nil, setting.cs.EvaluationSpace())
     if err != nil {panic(err)}
     R_tilde_values_enc, err := EncryptMatrix(R_tilde_values, setting)
     if err != nil {panic(err)}
@@ -443,7 +436,7 @@ func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max i
         if err != nil {panic(err)}
         p_val, err := decodeBI(p_values.At(0,i))
         if err != nil {panic(err)}
-        val, err := setting.cs.MultiplyScalar(mask_val, p_val)
+        val, err := setting.cs.Scale(mask_val, p_val)
         if err != nil {panic(err)}
         v.Set(0, i, val)
     }

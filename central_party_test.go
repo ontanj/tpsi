@@ -11,8 +11,7 @@ func TestCPHankelMatrix(t *testing.T) {
     setting.m = 3
     setting.T = 2
     setting.n = 4
-    pk, djsks, eval_space, err := NewDJCryptosystem(setting.n)
-    setting.eval_space = eval_space
+    pk, djsks, err := NewDJCryptosystem(setting.n)
     sks := ConvertDJSKSlice(djsks)
     if err != nil {t.Error(err)}
     setting.cs = pk

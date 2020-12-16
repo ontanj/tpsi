@@ -6,14 +6,21 @@ import (
     gm "github.com/ontanj/generic-matrix"
 )
 
+func ConvertDJSKSlice(sks_in []DJ_secret_key) []Secret_key {
+    sks_out := make([]Secret_key, len(sks_in))
+    for i, val := range sks_in {
+        sks_out[i] = Secret_key(val)
+    }
+    return sks_out
+}
+
 func TestHankelMatrix(t *testing.T) {
     var setting Setting
     items := []uint64{2, 3, 5}
     setting.m = 3
     setting.T = 2
     setting.n = 4
-    pk, _, eval_space, err := NewDJCryptosystem(setting.n)
-    setting.eval_space = eval_space
+    pk, _, err := NewDJCryptosystem(setting.n)
     if err != nil {t.Error(err)}
     setting.cs = pk
     q := big.NewInt(11)
@@ -40,18 +47,17 @@ func TestHankelMatrix(t *testing.T) {
 
 func TestEncryptValue(t *testing.T) {
     var setting Setting
-    pk, sks, eval_space, err := NewDJCryptosystem(4)
+    pk, sks, err := NewDJCryptosystem(4)
     if err != nil {t.Error(err)}
-    setting.eval_space = eval_space
     setting.cs = pk
     plaintext := big.NewInt(32)
     ciphertext, err := setting.cs.Encrypt(plaintext)
     if err != nil {
         t.Errorf("%v", err)
     }
-    decryptShares := make([]partial_decryption, 4)
+    decryptShares := make([]Partial_decryption, 4)
     for i, sk := range sks {
-        dks, err := PartialDecryptValue(ciphertext, sk)
+        dks, err := sk.PartialDecrypt(ciphertext)
         if err != nil {
             t.Errorf("%v", err)
         }
@@ -64,15 +70,14 @@ func TestEncryptValue(t *testing.T) {
     if plaintext.Cmp(dec_plaintext) != 0 {
         t.Error("decrypted value does not match plaintext")
     }
-    if plaintext.Cmp(ciphertext) == 0 {
+    if plaintext.Cmp(ciphertext.(*big.Int)) == 0 {
         t.Error("plaintext didn't encrypt")
     }
 }
 
 func TestEncryptMatrix(t *testing.T) {
     var setting Setting
-    pk, djsks, eval_space, err := NewDJCryptosystem(4)
-    setting.eval_space = eval_space
+    pk, djsks, err := NewDJCryptosystem(4)
     sks := ConvertDJSKSlice(djsks)
     setting.cs = pk
     if err != nil {t.Error(err)}
@@ -89,8 +94,7 @@ func TestEncryptMatrix(t *testing.T) {
 
 func TestDecryptMatrix(t *testing.T) {
     var setting Setting
-    pk, sks, eval_space, err := NewDJCryptosystem(4)
-    setting.eval_space = eval_space
+    pk, sks, err := NewDJCryptosystem(4)
     setting.cs = pk
     if err != nil {t.Error(err)}
     vals := []int{1,2,3,4,5,6,7,8,9}
@@ -124,10 +128,10 @@ func TestDecryptMatrix(t *testing.T) {
 }
 
 // checks if encrypted matrix a is equal to unencrypted matrix b, returns error otherwise
-func CompareEnc(enc, plain gm.Matrix, sks []secret_key, setting Setting, t *testing.T) {
+func CompareEnc(enc, plain gm.Matrix, sks []Secret_key, setting Setting, t *testing.T) {
     for i := 0; i < enc.Rows; i += 1 {
         for j := 0; j < enc.Cols; j += 1 {
-            decryptShares := make([]partial_decryption, len(sks))
+            decryptShares := make([]Partial_decryption, len(sks))
             for k, sk := range sks {
                 enc_val, err := decodeBI(enc.At(i, j))
                 if err != nil {t.Error(err)}
@@ -155,10 +159,9 @@ func TestMMult(t *testing.T) {
     if err != nil {t.Error(err)}
     var setting Setting
     setting.n = 4
-    pk, djsks, eval_space, _ := NewDJCryptosystem(setting.n)
+    pk, djsks, _ := NewDJCryptosystem(setting.n)
     sks := ConvertDJSKSlice(djsks)
     setting.cs = pk
-    setting.eval_space = eval_space
     A, _ = EncryptMatrix(A, setting)
     B, _ = EncryptMatrix(B, setting)
 
@@ -202,8 +205,7 @@ func TestMPC(t *testing.T) {
     a_plain := big.NewInt(13)
     var setting Setting
     setting.n = 4
-    pk, sks, eval_space, err := NewDJCryptosystem(setting.n)
-    setting.eval_space = eval_space
+    pk, sks, err := NewDJCryptosystem(setting.n)
     if err != nil {
         t.Error(err)
         return
@@ -213,7 +215,7 @@ func TestMPC(t *testing.T) {
 
     // step 1: sample d
     d_plain := make([]*big.Int, setting.n)
-    d_enc := make([]*big.Int, setting.n)
+    d_enc := make([]Ciphertext, setting.n)
     for i := range d_plain {
         plain, enc, err := GetRandomEncrypted(setting)
         if err != nil {t.Error(err)}
@@ -222,7 +224,7 @@ func TestMPC(t *testing.T) {
     }
 
     // step 5: mask and decrypt
-    e_parts := make([]partial_decryption, setting.n)
+    e_parts := make([]Partial_decryption, setting.n)
     for i := range d_enc {
         e_partial, err := SumMasksDecrypt(a, d_enc, sks[i], setting)
         if err != nil {t.Error(err)}
@@ -255,21 +257,21 @@ func TestMPC(t *testing.T) {
         if err != nil {t.Error(err)}
 
         // step 2: partial multiplication
-        partial_prods := make([]*big.Int, setting.n)        
+        partial_prods := make([]Ciphertext, setting.n)        
         for i, val := range as {
-            prod, err := MultiplyEncrypted(b, val, setting)
+            prod, err := setting.cs.Scale(b, val)
             if err != nil {t.Error(err)}
             partial_prods[i] = prod
         }
 
         // step 6: sum partials
-        sum, err := SumMultiplication(partial_prods, setting)
+        sum, err := SumSlice(partial_prods, setting)
         if err != nil {t.Error(err)}
         
         // verify
-        parts := make([]partial_decryption, setting.n)
+        parts := make([]Partial_decryption, setting.n)
         for i, sk := range sks {
-            part, err := PartialDecryptValue(sum, sk)
+            part, err := sk.PartialDecrypt(sum)
             if err != nil {t.Error(err)}
             parts[i] = part
         }
@@ -340,8 +342,7 @@ func TestInterpolation(t *testing.T) {
     // v_corr := []*big.Int{21,6,12,2,1}
     p_corr := []int64{14,7,1}
     var setting Setting
-    pk, _, eval_space, _ := NewDJCryptosystem(4)
-    setting.eval_space = eval_space
+    pk, _, _ := NewDJCryptosystem(4)
     pk.PubKey.N = big.NewInt(23)
     setting.cs = pk
     setting.T = 1
