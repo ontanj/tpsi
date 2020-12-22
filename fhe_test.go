@@ -2,255 +2,243 @@ package tpsi
 
 import (
     "testing"
-    "github.com/ldsec/lattigo/bfv"
     "math/big"
 )
 
 func TestEncryptDecrypt(t *testing.T) {
-    var setting fhe_setting
-    params := bfv.DefaultParams[bfv.PN14QP438]
-    params.T = 65537
-    setting.params = params
     n := 4
     channels := create_chans(n-1)
     return_channels := create_chans(n)
-    crs, crp := GenCRP(params)
-    setting.crs = crs
-    setting.crp = crp
     
     go func() {
-        pk, sk, _ := CentralKeyGenerator(setting, channels)
+        pk, sk := CentralBFVEncryptionGenerator(channels)
         return_channels[n-1] <- pk
         return_channels[n-1] <- sk
     }()
         for i := 0; i < n-1; i += 1 {
         go func(i int) {
-            pk, sk, _ := OuterKeyGenerator(setting, channels[i])
+            pk, sk := OuterBFVEncryptionGenerator(channels[i])
             return_channels[i] <- pk
             return_channels[i] <- sk
         }(i)
     }
-    sk := make([]*bfv.SecretKey, n)
-    var pk *bfv.PublicKey
+    sk := make([]BFV_secret_key, n)
+    setts := make([]FHESetting, n)
     for i, ch := range return_channels {
-        pk = (<-ch).(*bfv.PublicKey)
-        sk[i] = (<-ch).(*bfv.SecretKey)
+        setts[i].cs = (<-ch).(BFV_encryption)
+        sk[i] = (<-ch).(BFV_secret_key)
+        setts[i].n = n
     }
-    setting.pk = pk
     
-    enc := Encrypt(5, setting)
+    enc, err := setts[0].cs.Encrypt(big.NewInt(5))
+    if err != nil {panic(err)}
 
-    ret := make(chan []uint64)
-    tsk, tpk := bfv.NewKeyGenerator(params).GenKeyPair()
-    setting.tsk = tsk
-    setting.tpk = tpk
+    ret := make(chan *big.Int)
     go func() {
-        ret <- CentralDecryptor(enc, sk[n-1], setting, channels)
+        ret <- CentralDecryptionWorker(enc, sk[n-1], setts[n-1], channels)
     }()
     for i := 0; i < n-1; i += 1 {
         go func(i int) {
-            ret <- OuterDecryptor(enc, sk[i], setting, channels[i])
+            ret <- OuterDecryptionWorker(enc, sk[i], setts[i], channels[i])
         }(i)
     }
-    dec := <-ret
     
-    if dec[0] != 5 {
-        t.Errorf("wrong value after decryption, got %d", dec)
+    for i := 0; i < setts[0].n; i += 1 {
+        dec := <-ret
+        if dec.Cmp(big.NewInt(5)) != 0 {
+            t.Errorf("wrong value after decryption, got %d", dec)
+        }
     }
 }
 
 func TestEvaluation(t *testing.T) {
-    params := bfv.DefaultParams[bfv.PN14QP438]
-    params.T = 65537
-    var setting fhe_setting
-    setting.params = params
-    val1 := make([]uint64, 1)
-    val1[0] = 5
-    val2 := make([]uint64, 1)
-    val2[0] = 6
+    val1 := big.NewInt(5)
+    val2 := big.NewInt(6)
     n := 4
     channels := create_chans(n-1)
     return_channels := create_chans(n)
-    crs, crp := GenCRP(params)
-    setting.crs = crs
-    setting.crp = crp
-    encoder := bfv.NewEncoder(params)
-    pt1 := bfv.NewPlaintext(params)
-    encoder.EncodeUint(val1, pt1)
-    pt2 := bfv.NewPlaintext(params)
-    encoder.EncodeUint(val2, pt2)
-    
+
     go func() {
-        pk, sk, rlk := CentralKeyGenerator(setting, channels)
+        pk, sk := CentralBFVEncryptionGenerator(channels)
         return_channels[n-1] <- pk
         return_channels[n-1] <- sk
-        return_channels[n-1] <- rlk
     }()
         for i := 0; i < n-1; i += 1 {
         go func(i int) {
-            pk, sk, rlk := OuterKeyGenerator(setting, channels[i])
+            pk, sk := OuterBFVEncryptionGenerator(channels[i])
             return_channels[i] <- pk
             return_channels[i] <- sk
-            return_channels[i] <- rlk
         }(i)
     }
-    sk := make([]*bfv.SecretKey, n)
-    var pk *bfv.PublicKey
-    var rlk *bfv.EvaluationKey
+    sk := make([]Secret_key, n)
+    setts := make([]FHESetting, n)
     for i, ch := range return_channels {
-        pk = (<-ch).(*bfv.PublicKey)
-        sk[i] = (<-ch).(*bfv.SecretKey)
-        rlk = (<-ch).(*bfv.EvaluationKey)
+        setts[i].cs = (<-ch).(BFV_encryption)
+        setts[i].n = n
+        sk[i] = (<-ch).(Secret_key)
     }
     
-    encryptor := bfv.NewEncryptorFromPk(params, pk)
-    enc1 := bfv.NewCiphertext(params, 1)
-    encryptor.Encrypt(pt1, enc1)
-    enc2 := bfv.NewCiphertext(params, 1)
-    encryptor.Encrypt(pt2, enc2)
-    res := bfv.NewCiphertext(params, 2)
-
-    evaluator := bfv.NewEvaluator(params)
-    evaluator.Mul(enc1, enc2, res)
-    evaluator.Relinearize(res, rlk, res)
-
-    ret := make(chan []uint64)
-    tsk, tpk := bfv.NewKeyGenerator(params).GenKeyPair()
-    setting.tsk = tsk
-    setting.tpk = tpk
-    go func() {
-        dec := CentralDecryptor(res, sk[n-1], setting, channels)
-        ret <- dec
-    }()
-    for i := 0; i < n-1; i += 1 {
-        go func(i int) {
-            dec := OuterDecryptor(res, sk[i], setting, channels[i])
-            ret <- dec
-        }(i)
-    }
-    dec := <-ret
+    enc1, err := setts[0].cs.Encrypt(val1)
+    if err != nil {t.Error(err)}
+    enc2, err := setts[0].cs.Encrypt(val2)
+    if err != nil {t.Error(err)}
     
-    if dec[0] != 30 {
-        t.Errorf("wrong value after decryption, got %d", dec[0])
+    for j := 0; j < 10; j += 1 {
+
+        go func() {
+            enc2, err = setts[n-1].cs.Multiply(enc1, enc2)
+            if err != nil {t.Error(err)}
+            return_channels[n-1] <- enc2
+        }()
+        for i := 0; i < n-1; i += 1 {
+            go func(i int) {
+                enc2, err = setts[i].cs.Multiply(enc1, enc2)
+                if err != nil {t.Error(err)}
+            }(i)
+        }
+
+        enc2 := (<-return_channels[n-1]).(Ciphertext)
+
+        go func() {
+            dec := CentralDecryptionWorker(enc2, sk[n-1], setts[n-1], channels)
+            return_channels[n-1] <- dec
+        }()
+        for i := 0; i < n-1; i += 1 {
+            go func(i int) {
+                dec := OuterDecryptionWorker(enc2, sk[i], setts[i], channels[i])
+                return_channels[i] <- dec
+            }(i)
+        }
+
+        val2.Mul(val2, val1).Mod(val2, setts[0].FHE_cryptosystem().N())
+        for _, ch := range return_channels {
+            dec := (<-ch).(*big.Int)
+
+            if dec.Cmp(val2) != 0 {
+                t.Errorf("wrong value after %d multiplications, got %d expected %d", j+1, dec, val2)
+            }
+        }
     }
 }
 
+func SetupTest() ([]FHESetting, []Secret_key, []chan interface{}) {
+    return SetupTestN(4)
+}
+
+func SetupTestN(n int) ([]FHESetting, []Secret_key, []chan interface{}) {
+    settings := make([]FHESetting, n)
+    channels := create_chans(n-1)
+    return_channels := create_chans(n)
+    
+    go func() {
+        pk, sk := CentralBFVEncryptionGenerator(channels)
+        return_channels[n-1] <- pk
+        return_channels[n-1] <- sk
+    }()
+        for i := 0; i < n-1; i += 1 {
+        go func(i int) {
+            pk, sk := OuterBFVEncryptionGenerator(channels[i])
+            return_channels[i] <- pk
+            return_channels[i] <- sk
+        }(i)
+    }
+    sk := make([]Secret_key, n)
+    for i, ch := range return_channels {
+        settings[i].cs = (<-ch).(BFV_encryption)
+        sk[i] = (<-ch).(Secret_key)
+        settings[i].n = n
+    }
+
+    return settings, sk, channels
+}
+
 func TestInverse(t *testing.T) {
-    setting, sk, channels := SetupTest()
+    settings, sk, channels := SetupTest()
+    n := settings[0].Parties()
     
     t.Run("no factor", func(t *testing.T) {
-        enc := Encrypt(2,setting)
+        enc, err := settings[0].cs.Encrypt(big.NewInt(2))
+        if err != nil {t.Error(err)}
 
-        ret_inv := make(chan *bfv.Ciphertext)
-        ret_dec := make(chan []uint64)
+        ret_inv := make(chan Ciphertext)
+        ret_dec := make(chan *big.Int)
         
         go func() {
-            ret_inv <- CentralInverseWorker(enc, sk[setting.n-1], setting, channels)
+            ret_inv <- CentralInverseWorker(enc, sk[n-1], settings[n-1], channels)
         }()
-        for i := 0; i < setting.n-1; i += 1 {
+        for i := 0; i < n-1; i += 1 {
             go func(i int) {
-                OuterInverseWorker(sk[i], setting, channels[i])
+                OuterInverseWorker(enc, sk[i], settings[i], channels[i])
             }(i)
         }
 
         enc_inv := <-ret_inv
 
         go func() {
-            ret_dec <- CentralDecryptor(enc_inv, sk[setting.n-1], setting, channels)
+            ret_dec <- CentralDecryptionWorker(enc_inv, sk[n-1], settings[n-1], channels)
         }()
-        for i := 0; i < setting.n-1; i += 1 {
+        for i := 0; i < n-1; i += 1 {
             go func(i int) {
-                OuterDecryptor(enc_inv, sk[i], setting, channels[i])
+                OuterDecryptionWorker(enc_inv, sk[i], settings[i], channels[i])
             }(i)
         }
         dec := <-ret_dec
         
-        if dec[0] * 2 % setting.params.T != 1 {
-            t.Errorf("not an inverse, got %d", dec[0])
+        if dec.Mul(dec, big.NewInt(2)).Mod(dec, settings[0].cs.N()).Cmp(big.NewInt(1)) != 0 {
+            t.Errorf("not an inverse, got %d", dec)
         }
     })
 
     t.Run("-1 factor", func(t *testing.T) {
-        enc := Encrypt(3, setting)
-        channels := create_chans(setting.n-1)
-        ret_inv := make(chan *bfv.Ciphertext)
-        ret_dec := make(chan []uint64)
-
+        plain := big.NewInt(3)
+        enc, err := settings[0].cs.Encrypt(plain)
+        if err != nil {t.Error(err)}
+        channels := create_chans(n-1)
+        ret_inv := make(chan Ciphertext)
+        ret_dec := make(chan *big.Int)
+        minus_one := new(big.Int).Sub(settings[0].cs.N(), big.NewInt(1))
         go func() {
-            ret_inv <- CentralInverseWorkerWithFactor(enc, setting.params.T-1, sk[setting.n-1], setting, channels)
+            ret_inv <- CentralInverseWorkerWithFactor(enc, minus_one, sk[n-1], settings[n-1], channels)
         }()
-        for i := 0; i < setting.n-1; i += 1 {
+        for i := 0; i < n-1; i += 1 {
             go func(i int) {
-                OuterInverseWorker(sk[i], setting, channels[i])
+                OuterInverseWorkerWithFactor(enc, minus_one, sk[i], settings[i], channels[i])
             }(i)
         }
         enc_inv := <-ret_inv
 
         go func() {
-            ret_dec <- CentralDecryptor(enc_inv, sk[setting.n-1], setting, channels)
+            ret_dec <- CentralDecryptionWorker(enc_inv, sk[n-1], settings[n-1], channels)
         }()
-        for i := 0; i < setting.n-1; i += 1 {
+        for i := 0; i < n-1; i += 1 {
             go func(i int) {
-                OuterDecryptor(enc_inv, sk[i], setting, channels[i])
+                OuterDecryptionWorker(enc_inv, sk[i], settings[i], channels[i])
             }(i)
         }
         dec := <-ret_dec
 
-        if dec[0] * (setting.params.T-3) % setting.params.T != 1 {
-            t.Errorf("not an inverse, got %d", dec[0])
+        if dec.Mul(dec, plain).Mul(dec, minus_one).Mod(dec, settings[0].cs.N()).Cmp(big.NewInt(1)) != 0 {
+            t.Errorf("not an inverse, got %d", dec)
         }
     })
 }
 
 func TestFHEZeroTest(t *testing.T) {
-    var setting fhe_setting
-    params := bfv.DefaultParams[bfv.PN14QP438]
-    params.T = 65537
-    setting.params = params
-    setting.n = 4
-    channels := create_chans(setting.n-1)
-    return_channels := create_chans(setting.n)
-    crs, crp := GenCRP(params)
-    setting.crs = crs
-    setting.crp = crp
+    settings, sk, channels := SetupTest()
+    n := settings[0].Parties()
     
-    go func() {
-        pk, sk, rlk := CentralKeyGenerator(setting, channels)
-        return_channels[setting.n-1] <- pk
-        return_channels[setting.n-1] <- sk
-        return_channels[setting.n-1] <- rlk
-    }()
-        for i := 0; i < setting.n-1; i += 1 {
-        go func(i int) {
-            pk, sk, rlk := OuterKeyGenerator(setting, channels[i])
-            return_channels[i] <- pk
-            return_channels[i] <- sk
-            return_channels[i] <- rlk
-        }(i)
-    }
-    sk := make([]*bfv.SecretKey, setting.n)
-    var pk *bfv.PublicKey
-    for i, ch := range return_channels {
-        pk = (<-ch).(*bfv.PublicKey)
-        sk[i] = (<-ch).(*bfv.SecretKey)
-        setting.rlk = (<-ch).(*bfv.EvaluationKey)
-    }
-    setting.pk = pk
-
-    tsk, tpk := bfv.NewKeyGenerator(params).GenKeyPair()
-    setting.tsk = tsk
-    setting.tpk = tpk
-
     t.Run("not zero", func(t *testing.T) {
-        val := Encrypt(98, setting)
+        return_channels := create_chans(n)
+        val, err := settings[0].cs.Encrypt(big.NewInt(98))
+        if err != nil {t.Error(err)}
 
         go func() {
-            pred := CentralFHEZeroTestWorker(val, sk[setting.n-1], setting, channels)
-            return_channels[setting.n-1] <- pred
+            pred := CentralZeroTestWorker(val, sk[n-1], settings[n-1], channels)
+            return_channels[n-1] <- pred
         }()
-        for i := 0; i < setting.n-1; i += 1 {
+        for i := 0; i < n-1; i += 1 {
             go func(i int) {
-                pred := OuterFHEZeroTestWorker(sk[i], setting, channels[i])
+                pred := OuterZeroTestWorker(val, sk[i], settings[i], channels[i])
                 return_channels[i] <- pred
             }(i)
         }
@@ -263,18 +251,19 @@ func TestFHEZeroTest(t *testing.T) {
     })
 
     t.Run("is zero", func(t *testing.T) {
-        val := Encrypt(0, setting)
+        val, err := settings[0].cs.Encrypt(big.NewInt(0))
+        if err != nil {t.Error(err)}
             
-        channels := create_chans(setting.n-1)
-        return_channels := create_chans(setting.n)
+        channels := create_chans(n-1)
+        return_channels := create_chans(n)
 
         go func() {
-            pred := CentralFHEZeroTestWorker(val, sk[setting.n-1], setting, channels)
-            return_channels[setting.n-1] <- pred
+            pred := CentralZeroTestWorker(val, sk[n-1], settings[n-1], channels)
+            return_channels[n-1] <- pred
         }()
-        for i := 0; i < setting.n-1; i += 1 {
+        for i := 0; i < n-1; i += 1 {
             go func(i int) {
-                pred := OuterFHEZeroTestWorker(sk[i], setting, channels[i])
+                pred := OuterZeroTestWorker(val, sk[i], settings[i], channels[i])
                 return_channels[i] <- pred
             }(i)
         }
@@ -287,78 +276,38 @@ func TestFHEZeroTest(t *testing.T) {
     })
 }
 
-func SetupTest() (fhe_setting, []*bfv.SecretKey, []chan interface{}) {
-    return SetupTestN(4)
-}
-
-func SetupTestN(n int) (fhe_setting, []*bfv.SecretKey, []chan interface{}) {
-    var setting fhe_setting
-    params := bfv.DefaultParams[bfv.PN14QP438]
-    params.T = 65537
-    setting.params = params
-    setting.n = n
-    channels := create_chans(setting.n-1)
-    return_channels := create_chans(setting.n)
-    crs, crp := GenCRP(params)
-    setting.crs = crs
-    setting.crp = crp
-    
-    go func() {
-        pk, sk, rlk := CentralKeyGenerator(setting, channels)
-        return_channels[setting.n-1] <- pk
-        return_channels[setting.n-1] <- sk
-        return_channels[setting.n-1] <- rlk
-    }()
-        for i := 0; i < setting.n-1; i += 1 {
-        go func(i int) {
-            pk, sk, rlk := OuterKeyGenerator(setting, channels[i])
-            return_channels[i] <- pk
-            return_channels[i] <- sk
-            return_channels[i] <- rlk
-        }(i)
-    }
-    sk := make([]*bfv.SecretKey, setting.n)
-    var pk *bfv.PublicKey
-    for i, ch := range return_channels {
-        pk = (<-ch).(*bfv.PublicKey)
-        sk[i] = (<-ch).(*bfv.SecretKey)
-        setting.rlk = (<-ch).(*bfv.EvaluationKey)
-    }
-    setting.pk = pk
-
-    tsk, tpk := bfv.NewKeyGenerator(params).GenKeyPair()
-    setting.tsk = tsk
-    setting.tpk = tpk
-
-    return setting, sk, channels
-}
-
 func TestFHEInterpolation(t *testing.T) {
     t.Run("at threshold", func(t *testing.T) {
-        setting, sk, channels := SetupTest()
-        setting.T = 1
-        mod := new(big.Int).SetUint64(setting.params.T)
-        num := PolyFromRoots([]uint64{2,6}, mod)
-        den := PolyFromRoots([]uint64{4,8}, mod)
-        q := make([]*bfv.Ciphertext, setting.T*2+3)
-        sol := []uint64{12,setting.params.T-8,1,32,setting.params.T-12,1}
+        settings, sk, channels := SetupTest()
+        n := settings[0].Parties()
+        for i := range settings {
+            settings[i].T = 1
+        }
+        mod := settings[0].cs.N()
+        int_mod := mod.Int64()
+        num := PolyFromRoots(bigIntSlice([]int64{2,6}), mod)
+        den := PolyFromRoots(bigIntSlice([]int64{4,8}), mod)
+        q := make([]Ciphertext, settings[0].T*2+3)
+        sol := bigIntSlice([]int64{12,int_mod-8,1,32,int_mod-12,1})
+        var err error
         for i := range q {
-            num_eval := EvalPoly(num, uint64(2*i+1), mod)
-            den_eval := EvalPoly(den, uint64(2*i+1), mod)
+            num_eval := EvalPoly(num, big.NewInt(int64(2*i+1)), mod)
+            den_eval := EvalPoly(den, big.NewInt(int64(2*i+1)), mod)
             den_inv := new(big.Int).ModInverse(den_eval, mod)
             a := new(big.Int)
-            q_p := a.Mul(num_eval, den_inv).Mod(a, mod).Uint64()
-            q[i] = Encrypt(q_p, setting)
+            q_p := a.Mul(num_eval, den_inv)
+            q[i], err = settings[0].cs.Encrypt(q_p)
+            if err != nil {t.Error(err)}
         }
-        ret := make(chan []*bfv.Ciphertext)
+        ret := make(chan []Ciphertext)
 
         go func() {
-            den := CentralFHEInterpolation(q, sk[setting.n-1], setting, channels)
+            den := FHEInterpolation(q, sk[n-1], settings[n-1], channels, nil)
             ret <- den
         }()
         for i := range channels {
             go func(i int) {
-                OuterFHEInterpolation(sk[i], setting, channels[i])
+                FHEInterpolation(q, sk[i], settings[i], nil, channels[i])
             }(i)
         }
 
@@ -366,49 +315,55 @@ func TestFHEInterpolation(t *testing.T) {
         if len(int_den) != len(sol) {
             t.Errorf("wrong length, expected %d, got %d", den.Cols, len(int_den))
         }
-        rets := create_chans(setting.n)
+        rets := create_chans(n)
         for index := range int_den {
             go func(index int) {
-                rets[setting.n-1] <- CentralDecryptor(int_den[index], sk[setting.n-1], setting, channels)
+                rets[n-1] <- CentralDecryptionWorker(int_den[index], sk[n-1], settings[n-1], channels)
             }(index)
             for party := range channels {
                 go func(index, party int) {
-                    rets[party] <- OuterDecryptor(int_den[index], sk[party], setting, channels[party])
+                    rets[party] <- OuterDecryptionWorker(int_den[index], sk[party], settings[party], channels[party])
                 }(index, party)
             }
             for p, ch := range rets {
-                dec := (<-ch).([]uint64)
-                if dec[0] != sol[index] {
-                    t.Errorf("wrong number for party %d at index %d, expected %d got %d", p, index, sol[index], dec[0])
+                dec := (<-ch).(*big.Int)
+                if dec.Cmp(sol[index]) != 0 {
+                    t.Errorf("wrong number for party %d at index %d, expected %d got %d", p, index, sol[index], dec)
                 }
             }
         }
     })
     t.Run("below threshold", func(t *testing.T) {
-        setting, sk, channels := SetupTest()
-        setting.T = 3
-        mod := new(big.Int).SetUint64(setting.params.T)
-        num := PolyFromRoots([]uint64{2,6}, mod)
-        den := PolyFromRoots([]uint64{4,8}, mod)
-        q := make([]*bfv.Ciphertext, setting.T*2+3)
-        sol := []uint64{12,setting.params.T-8,1,0,0,32,setting.params.T-12,1}
+        settings, sk, channels := SetupTest()
+        n := settings[0].Parties()
+        for i := range settings {
+            settings[i].T = 3
+        }
+        mod := settings[0].cs.N()
+        int_mod := mod.Int64()
+        num := PolyFromRoots(bigIntSlice([]int64{2,6}), mod)
+        den := PolyFromRoots(bigIntSlice([]int64{4,8}), mod)
+        q := make([]Ciphertext, settings[0].T*2+3)
+        sol := bigIntSlice([]int64{12,int_mod-8,1,0,0,32,int_mod-12,1})
+        var err error
         for i := range q {
-            num_eval := EvalPoly(num, uint64(2*i+1), mod)
-            den_eval := EvalPoly(den, uint64(2*i+1), mod)
+            num_eval := EvalPoly(num, big.NewInt(int64(2*i+1)), mod)
+            den_eval := EvalPoly(den, big.NewInt(int64(2*i+1)), mod)
             den_inv := new(big.Int).ModInverse(den_eval, mod)
             a := new(big.Int)
-            q_p := a.Mul(num_eval, den_inv).Mod(a, mod).Uint64()
-            q[i] = Encrypt(q_p, setting)
+            q_p := a.Mul(num_eval, den_inv)
+            q[i], err = settings[0].cs.Encrypt(q_p)
+            if err != nil {t.Error(err)}
         }
-        ret := make(chan []*bfv.Ciphertext)
+        ret := make(chan []Ciphertext)
 
         go func() {
-            den := CentralFHEInterpolation(q, sk[setting.n-1], setting, channels)
+            den := FHEInterpolation(q, sk[n-1], settings[n-1], channels, nil)
             ret <- den
         }()
         for i := range channels {
             go func(i int) {
-                OuterFHEInterpolation(sk[i], setting, channels[i])
+                FHEInterpolation(q, sk[i], settings[i], nil, channels[i])
             }(i)
         }
 
@@ -416,20 +371,20 @@ func TestFHEInterpolation(t *testing.T) {
         if len(int_den) != len(sol) {
             t.Errorf("wrong length, expected %d, got %d", den.Cols, len(int_den))
         }
-        rets := create_chans(setting.n)
+        rets := create_chans(n)
         for index := range int_den {
             go func(index int) {
-                rets[setting.n-1] <- CentralDecryptor(int_den[index], sk[setting.n-1], setting, channels)
+                rets[n-1] <- CentralDecryptionWorker(int_den[index], sk[n-1], settings[n-1], channels)
             }(index)
             for party := range channels {
                 go func(index, party int) {
-                    rets[party] <- OuterDecryptor(int_den[index], sk[party], setting, channels[party])
+                    rets[party] <- OuterDecryptionWorker(int_den[index], sk[party], settings[party], channels[party])
                 }(index, party)
             }
             for p, ch := range rets {
-                dec := (<-ch).([]uint64)
-                if dec[0] != sol[index] {
-                    t.Errorf("wrong number for party %d at index %d, expected %d got %d", p, index, sol[index], dec[0])
+                dec := (<-ch).(*big.Int)
+                if dec.Cmp(sol[index]) != 0 {
+                    t.Errorf("wrong number for party %d at index %d, expected %d got %d", p, index, sol[index], dec)
                 }
             }
         }
@@ -437,20 +392,23 @@ func TestFHEInterpolation(t *testing.T) {
 }
 
 func TestFHECardinalityTest(t *testing.T) {
-    setting, sk, channels := SetupTest()
+    settings, sk, channels := SetupTestN(4)
+    n := settings[0].Parties()
     t.Run("passing cardinality test", func(t *testing.T) {
-        setting.T = 3
+        for i := range settings {
+            settings[i].T = 3
+        }
         ret := make(chan bool)
-        items := [][]uint64{[]uint64{2,4,6,8,10},
-                            []uint64{2,4,6,12,14},
-                            []uint64{2,4,6,16,18},
-                            []uint64{2,4,6,20,22}}
+        items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,10}),
+                              bigIntSlice([]int64{2,4,6,12,14}),
+                              bigIntSlice([]int64{2,4,6,16,18}),
+                              bigIntSlice([]int64{2,4,6,20,22})}
         go func() {
-            ret <- CentralFHECardinalityTestWorker(items[setting.n-1], sk[setting.n-1], setting, channels, nil)
+            ret <- CentralFHECardinalityTestWorker(items[n-1], sk[n-1], settings[n-1], channels, nil)
         }()
         for i := range channels {
             go func(i int) {
-                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], setting, nil, channels[i])
+                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], settings[i], nil, channels[i])
             }(i)
         }
         for _ = range items {
@@ -461,18 +419,20 @@ func TestFHECardinalityTest(t *testing.T) {
     })
 
     t.Run("failing cardinality test", func(t *testing.T) {
-        setting.T = 2
+        for i := range settings {
+            settings[i].T = 2
+        }
         ret := make(chan bool)
-        items := [][]uint64{[]uint64{2,4,6,8,10,24},
-                            []uint64{2,4,6,12,14,26},
-                            []uint64{2,4,6,16,18,28},
-                            []uint64{2,4,6,20,22,30}}
+        items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,10,24}),
+                              bigIntSlice([]int64{2,4,6,12,14,26}),
+                              bigIntSlice([]int64{2,4,6,16,18,28}),
+                              bigIntSlice([]int64{2,4,6,20,22,30})}
         go func() {
-            ret <- CentralFHECardinalityTestWorker(items[setting.n-1], sk[setting.n-1], setting, channels, nil)
+            ret <- CentralFHECardinalityTestWorker(items[n-1], sk[n-1], settings[n-1], channels, nil)
         }()
         for i := range channels {
             go func(i int) {
-                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], setting, nil, channels[i])
+                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], settings[i], nil, channels[i])
             }(i)
         }
         for _ = range items {

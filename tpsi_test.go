@@ -15,8 +15,8 @@ func ConvertDJSKSlice(sks_in []DJ_secret_key) []Secret_key {
 }
 
 func TestHankelMatrix(t *testing.T) {
-    var setting Setting
-    items := []uint64{2, 3, 5}
+    var setting AHESetting
+    items := bigIntSlice([]int64{2, 3, 5})
     setting.m = 3
     setting.T = 2
     setting.n = 4
@@ -46,7 +46,7 @@ func TestHankelMatrix(t *testing.T) {
 }
 
 func TestEncryptValue(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     pk, sks, err := NewDJCryptosystem(4)
     if err != nil {t.Error(err)}
     setting.cs = pk
@@ -76,7 +76,7 @@ func TestEncryptValue(t *testing.T) {
 }
 
 func TestEncryptMatrix(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     pk, djsks, err := NewDJCryptosystem(4)
     sks := ConvertDJSKSlice(djsks)
     setting.cs = pk
@@ -93,7 +93,7 @@ func TestEncryptMatrix(t *testing.T) {
 }
 
 func TestDecryptMatrix(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     pk, sks, err := NewDJCryptosystem(4)
     setting.cs = pk
     if err != nil {t.Error(err)}
@@ -109,7 +109,7 @@ func TestDecryptMatrix(t *testing.T) {
         }
         partial_decrypts[i] = pd
     }
-    decrypted, err := CombineMatrixShares(partial_decrypts, setting)
+    decrypted, err := CombineMatrixShares(partial_decrypts, enc, setting)
     if err != nil {
         return
     }
@@ -128,12 +128,14 @@ func TestDecryptMatrix(t *testing.T) {
 }
 
 // checks if encrypted matrix a is equal to unencrypted matrix b, returns error otherwise
-func CompareEnc(enc, plain gm.Matrix, sks []Secret_key, setting Setting, t *testing.T) {
+func CompareEnc(enc, plain gm.Matrix, sks []Secret_key, setting AHESetting, t *testing.T) {
     for i := 0; i < enc.Rows; i += 1 {
         for j := 0; j < enc.Cols; j += 1 {
             decryptShares := make([]Partial_decryption, len(sks))
+            var enc_val Ciphertext
+            var err error
             for k, sk := range sks {
-                enc_val, err := decodeBI(enc.At(i, j))
+                enc_val, err = decodeBI(enc.At(i, j))
                 if err != nil {t.Error(err)}
                 dks, err := sk.PartialDecrypt(enc_val)
                 if err != nil {t.Error(err)}
@@ -157,7 +159,7 @@ func TestMMult(t *testing.T) {
     if err != nil {t.Error(err)}
     AB_corr, err := A.Multiply(B)
     if err != nil {t.Error(err)}
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, djsks, _ := NewDJCryptosystem(setting.n)
     sks := ConvertDJSKSlice(djsks)
@@ -196,14 +198,14 @@ func TestMMult(t *testing.T) {
     }
 
     // step 4
-    AB, err := CombineMatrixMultiplication(MA_parts, MB_parts, cts, setting)
+    AB, err := CombineMatrixMultiplication(MA, MB, MA_parts, MB_parts, cts, setting)
     CompareEnc(AB, AB_corr, sks, setting, t)
 }
 
 func TestMPC(t *testing.T) {
     // setup
     a_plain := big.NewInt(13)
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sks, err := NewDJCryptosystem(setting.n)
     if err != nil {
@@ -225,8 +227,9 @@ func TestMPC(t *testing.T) {
 
     // step 5: mask and decrypt
     e_parts := make([]Partial_decryption, setting.n)
+    var e_partial Partial_decryption
     for i := range d_enc {
-        e_partial, err := SumMasksDecrypt(a, d_enc, sks[i], setting)
+        e_partial, err = SumMasksDecrypt(a, d_enc, sks[i], setting)
         if err != nil {t.Error(err)}
         e_parts[i] = e_partial
     }
@@ -287,12 +290,12 @@ func TestMPC(t *testing.T) {
 func TestEvalPoly(t *testing.T) {
     p, err := gm.NewMatrixFromInt(1, 3, []int{2,4,3})
     if err != nil {t.Error(err)}
-    x := []uint64{0,1,2}
-    y := []int64{2,9,0}
+    x := bigIntSlice([]int64{0,1,2})
+    y := bigIntSlice([]int64{2,9,0})
     mod := big.NewInt(11)
     for i := 0; i < len(x); i += 1 {
         ev_y := EvalPoly(p, x[i], mod)
-        if ev_y.Cmp(new(big.Int).SetInt64(y[i])) != 0 {
+        if ev_y.Cmp(y[i]) != 0 {
             t.Errorf("expected %d, got %d", y[i], ev_y)
         }
     }
@@ -318,8 +321,8 @@ func TestPolyMult(t *testing.T) {
 }
 
 func TestPolyFromRoots(t *testing.T) {
-    roots := []uint64{1, 2}
-    poly := []int64{2,8,1}
+    roots := bigIntSlice([]int64{1, 2})
+    poly := bigIntSlice([]int64{2,8,1})
     mod := big.NewInt(11)
     rpol := PolyFromRoots(roots, mod)
     if len(poly) != rpol.Cols {
@@ -328,7 +331,7 @@ func TestPolyFromRoots(t *testing.T) {
     for i := 0; i < len(poly); i += 1 {
         rpol_val, err := decodeBI(rpol.At(0,i))
         if err != nil {t.Error(err)}
-        if new(big.Int).SetInt64(poly[i]).Cmp(rpol_val) != 0 {
+        if poly[i].Cmp(rpol_val) != 0 {
             t.Errorf("error at %d: expected %d, got %d", i, poly[i], rpol_val)
         }
     }
@@ -341,7 +344,7 @@ func TestInterpolation(t *testing.T) {
     if err != nil {t.Error(err)}
     // v_corr := []*big.Int{21,6,12,2,1}
     p_corr := []int64{14,7,1}
-    var setting Setting
+    var setting AHESetting
     pk, _, _ := NewDJCryptosystem(4)
     pk.PubKey.N = big.NewInt(23)
     setting.cs = pk

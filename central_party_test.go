@@ -6,8 +6,8 @@ import (
 )
 
 func TestCPHankelMatrix(t *testing.T) {
-    var setting Setting
-    items := []uint64{2, 3, 5}
+    var setting AHESetting
+    items := []*big.Int{big.NewInt(2), big.NewInt(3), big.NewInt(5)}
     setting.m = 3
     setting.T = 2
     setting.n = 4

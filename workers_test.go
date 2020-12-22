@@ -16,7 +16,7 @@ func create_chans(n int) []chan interface{} {
 }
 
 func TestASSWorkers(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sks, err := NewDJCryptosystem(4)
     if err != nil {t.Error(err)}
@@ -48,7 +48,7 @@ func TestASSWorkers(t *testing.T) {
 }
 
 func TestMultWorkers(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sks, err := NewDJCryptosystem(4)
     if err != nil {t.Error(err)}
@@ -89,7 +89,7 @@ func TestMultWorkers(t *testing.T) {
 }
 
 func TestZeroTestWorkers(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sks, err := NewDJCryptosystem(setting.n)
     if err != nil {panic(err)}
@@ -141,7 +141,7 @@ func TestZeroTestWorkers(t *testing.T) {
 }
 
 func TestDecryptionWorkers(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sks, err := NewDJCryptosystem(setting.n)
     if err != nil {panic(err)}
@@ -169,7 +169,7 @@ func TestDecryptionWorkers(t *testing.T) {
     }
 }
 
-func t_decrypt(cipher *big.Int, sks []Secret_key, setting Setting) *big.Int {
+func t_decrypt(cipher *big.Int, sks []Secret_key, setting AHESetting) *big.Int {
     channels := create_chans(setting.n-1)
     return_channel := make(chan *big.Int, 4) // only read first return value
     go func() {
@@ -184,7 +184,7 @@ func t_decrypt(cipher *big.Int, sks []Secret_key, setting Setting) *big.Int {
     return val
 }
 
-func t_decryptPoly(num, den gm.Matrix, sks []Secret_key, setting Setting) []*big.Int {
+func t_decryptPoly(num, den gm.Matrix, sks []Secret_key, setting AHESetting) []*big.Int {
     p := make([]*big.Int, num.Cols)
     for i := 0; i < num.Cols; i += 1 {
         num_enc, _ := decodeBI(num.At(0,i))
@@ -198,7 +198,7 @@ func t_decryptPoly(num, den gm.Matrix, sks []Secret_key, setting Setting) []*big
 }
 
 func TestPolynomialDivisionWorkers(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sksdj, err := NewDJCryptosystem(setting.n)
     sks := ConvertDJSKSlice(sksdj)
@@ -289,7 +289,7 @@ func TestPolynomialDivisionWorkers(t *testing.T) {
 }
 
 func TestAnotherPolynomialDivisionWorkers(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sksdj, err := NewDJCryptosystem(setting.n)
     sks := ConvertDJSKSlice(sksdj)
@@ -381,7 +381,7 @@ func TestAnotherPolynomialDivisionWorkers(t *testing.T) {
 }
 
 func TestEncryptedPolyMult(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, djsks, err := NewDJCryptosystem(4)
     sks := ConvertDJSKSlice(djsks)
@@ -440,7 +440,7 @@ func TestEncryptedPolyMult(t *testing.T) {
 }
 
 func TestPolySub(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, djsks, err := NewDJCryptosystem(4)
     sks := ConvertDJSKSlice(djsks)
@@ -499,7 +499,7 @@ func TestPolySub(t *testing.T) {
 }
 
 func TestTDecryptPoly(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, djsks, _ := NewDJCryptosystem(4)
     sks := ConvertDJSKSlice(djsks)
@@ -522,7 +522,7 @@ func t_negate(a int64, p *big.Int) *big.Int {
 }
 
 func TestMinPolyWorker(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, djsks, err := NewDJCryptosystem(setting.n)
     sks := ConvertDJSKSlice(djsks)
@@ -574,7 +574,7 @@ func TestMinPolyWorker(t *testing.T) {
     }
 }
 
-func t_normalizePoly(poly []*big.Int, setting Setting) {
+func t_normalizePoly(poly []*big.Int, setting AHESetting) {
     inv := new(big.Int)
     inv.ModInverse(poly[len(poly)-1], setting.cs.N())
     for i := 0; i < len(poly); i += 1 {
@@ -588,7 +588,7 @@ func TestMatrixMultiplicationWorker(t *testing.T) {
     A, _ := gm.NewMatrixFromInt(3, 3, []int{1, 2, 3, 4, 5, 6, 7, 8, 9})
     B, _ := gm.NewMatrixFromInt(3, 3, []int{1, 2, 1, 2, 1, 2, 1, 2, 1})
     AB_corr, _ := A.Multiply(B)
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, djsks, _ := NewDJCryptosystem(setting.n)
     sks := ConvertDJSKSlice(djsks)
@@ -615,7 +615,7 @@ func TestMatrixMultiplicationWorker(t *testing.T) {
 }
 
 func TestSingularityTestWorker(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sks, err := NewDJCryptosystem(4)
     if err != nil {t.Error(err)}
@@ -678,18 +678,18 @@ func TestSingularityTestWorker(t *testing.T) {
 
 func TestCardinalityTestWorker(t *testing.T) {
     t.Run("below threshold", func (t *testing.T) {
-        var setting Setting
+        var setting AHESetting
         setting.n = 4
         pk, sks, err := NewDJCryptosystem(setting.n)
         if err != nil {t.Error(err)}
         setting.cs = pk
         setting.T = 8
         setting.m = 4
-        all_items := make([][]uint64, setting.n)
-        all_items[0] = []uint64{1,2,5,6}
-        all_items[1] = []uint64{1,2,10,11}
-        all_items[2] = []uint64{1,2,15,16}
-        all_items[3] = []uint64{1,2,18,19}
+        all_items := make([][]*big.Int, setting.n)
+        all_items[0] = bigIntSlice([]int64{1,2,5,6})
+        all_items[1] = bigIntSlice([]int64{1,2,10,11})
+        all_items[2] = bigIntSlice([]int64{1,2,15,16})
+        all_items[3] = bigIntSlice([]int64{1,2,18,19})
         
         channels := create_chans(setting.n-1)
         return_channel := make(chan bool)
@@ -711,18 +711,18 @@ func TestCardinalityTestWorker(t *testing.T) {
     })
 
     t.Run("above threshold", func (t *testing.T) {
-        var setting Setting
+        var setting AHESetting
         setting.n = 4
         pk, sks, err := NewDJCryptosystem(setting.n)
         if err != nil {t.Error(err)}
         setting.cs = pk
         setting.T = 7
         setting.m = 6
-        all_items := make([][]uint64, setting.n)
-        all_items[0] = []uint64{1,2,3,4,5,6}
-        all_items[1] = []uint64{1,2,3,4,10,11}
-        all_items[2] = []uint64{1,2,3,4,15,16}
-        all_items[3] = []uint64{1,2,3,4,20,21}
+        all_items := make([][]*big.Int, setting.n)
+        all_items[0] = bigIntSlice([]int64{1,2,3,4,5,6})
+        all_items[1] = bigIntSlice([]int64{1,2,3,4,10,11})
+        all_items[2] = bigIntSlice([]int64{1,2,3,4,15,16})
+        all_items[3] = bigIntSlice([]int64{1,2,3,4,20,21})
         
         channels := create_chans(setting.n-1)
         return_channel := make(chan bool)
@@ -745,11 +745,11 @@ func TestCardinalityTestWorker(t *testing.T) {
 }
 
 func TestIntersectionPoly(t *testing.T) {
-    items := [][]uint64{[]uint64{1,3,4,5},
-                       []uint64{1,3,6,7},
-                       []uint64{1,3,8,9},
-                       []uint64{1,3,10,11}}
-    var setting Setting
+    items := [][]*big.Int{bigIntSlice([]int64{1,3,4,5}),
+                          bigIntSlice([]int64{1,3,6,7}),
+                          bigIntSlice([]int64{1,3,8,9}),
+                          bigIntSlice([]int64{1,3,10,11})}
+    var setting AHESetting
     setting.n = 4
     pk, sks, err := NewDJCryptosystem(setting.n)
     if err != nil {t.Error(err)}
@@ -792,13 +792,13 @@ func TestIntersectionPoly(t *testing.T) {
 }
 
 func TestIntersection(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
-    items := [][]uint64{
-        []uint64{100,102,202,204,206},
-        []uint64{100,102,302,304,306},
-        []uint64{100,102,402,404,406},
-        []uint64{100,102,502,504,506}}
+    items := [][]*big.Int{
+        bigIntSlice([]int64{100,102,202,204,206}),
+        bigIntSlice([]int64{100,102,302,304,306}),
+        bigIntSlice([]int64{100,102,402,404,406}),
+        bigIntSlice([]int64{100,102,502,504,506})}
     no_shared := 2
     no_unique := 3
     setting.T = no_unique * setting.n
@@ -806,16 +806,16 @@ func TestIntersection(t *testing.T) {
     if err != nil {panic(err)}
     setting.cs = pk
     channels := create_chans(setting.n-1)
-    return_channels := make([]chan []uint64, setting.n)
+    return_channels := make([]chan []*big.Int, setting.n)
     for i := 0; i < setting.n-1; i += 1 {
-        return_channels[i] = make(chan []uint64)
+        return_channels[i] = make(chan []*big.Int)
         go func(i int) {
             shared, unique := IntersectionWorker(items[i], sks[i], setting, false, nil, channels[i])
             return_channels[i] <- shared
             return_channels[i] <- unique
         }(i)
     }
-    return_channels[setting.n-1] = make(chan []uint64)
+    return_channels[setting.n-1] = make(chan []*big.Int)
     go func() {
         shared, unique := IntersectionWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
         return_channels[setting.n-1] <- shared
@@ -847,12 +847,12 @@ func TestIntersection(t *testing.T) {
 }
 
 func TestTPSIdiff(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 3
     setting.m = 7
-    items := [][]uint64{[]uint64{2,4,6,8,10,12,14},
-                       []uint64{2,4,6,8,10,16,18},
-                       []uint64{2,4,6,8,12,20,22}}
+    items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,10,12,14}),
+                          bigIntSlice([]int64{2,4,6,8,10,16,18}),
+                          bigIntSlice([]int64{2,4,6,8,12,20,22})}
     pk, sks, err := NewDJCryptosystem(setting.n)
     if err != nil {t.Error(err)}
     setting.cs = pk
@@ -861,16 +861,16 @@ func TestTPSIdiff(t *testing.T) {
         no_shared := 4
         setting.T = 7
         channels := create_chans(setting.n-1)
-        returns := make([]chan []uint64, setting.n)
+        returns := make([]chan []*big.Int, setting.n)
         for i := 0; i < setting.n-1; i += 1 {
-            returns[i] = make(chan []uint64)
+            returns[i] = make(chan []*big.Int)
             go func(i int) {
                 sh, uq := TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i])
                 returns[i] <- sh
                 returns[i] <- uq
             }(i)
         }
-        returns[setting.n-1] = make(chan []uint64)
+        returns[setting.n-1] = make(chan []*big.Int)
         go func() {
             sh, uq := TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
             returns[setting.n-1] <- sh
@@ -904,16 +904,16 @@ func TestTPSIdiff(t *testing.T) {
     t.Run("fail cardinality test", func(t *testing.T) {
         setting.T = 6
         channels := create_chans(setting.n-1)
-        returns := make([]chan []uint64, setting.n)
+        returns := make([]chan []*big.Int, setting.n)
         for i := 0; i < setting.n-1; i += 1 {
-            returns[i] = make(chan []uint64)
+            returns[i] = make(chan []*big.Int)
             go func(i int) {
                 sh, uq := TPSIdiffWorker(items[i], sks[i], setting, false, nil, channels[i])
                 returns[i] <- sh
                 returns[i] <- uq
             }(i)
         }
-        returns[setting.n-1] = make(chan []uint64)
+        returns[setting.n-1] = make(chan []*big.Int)
         go func() {
             sh, uq := TPSIdiffWorker(items[setting.n-1], sks[setting.n-1], setting, true, channels, nil)
             returns[setting.n-1] <- sh
@@ -930,7 +930,7 @@ func TestTPSIdiff(t *testing.T) {
 }
 
 func TestEncryptedZeroMatrix(t *testing.T) {
-    var setting Setting
+    var setting AHESetting
     setting.n = 4
     pk, sks, _ := NewDJCryptosystem(setting.n)
     setting.cs = pk

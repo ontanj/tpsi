@@ -29,6 +29,13 @@ type AHE_Cryptosystem interface {
     N() *big.Int
 }
 
+type FHE_Cryptosystem interface {
+    AHE_Cryptosystem
+
+    // multiplication of two elements
+    Multiply(Ciphertext, Ciphertext) (Ciphertext, error)
+}
+
 type Secret_key interface {
     PartialDecrypt(Ciphertext) (Partial_decryption, error)
 }

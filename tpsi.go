@@ -6,16 +6,17 @@ import (
     gm "github.com/ontanj/generic-matrix"
 )
 
-type Setting struct {
-    cs AHE_Cryptosystem
-    n int // number of participants
-    m int // set size
-    T int // threshold
-}
-
 type PartialMatrix struct {
     values []Partial_decryption
     rows, cols int
+}
+
+func bigIntSlice(in []int64) []*big.Int {
+    bin := make([]*big.Int, len(in))
+    for i, v := range in {
+        bin[i] = big.NewInt(v)
+    }
+    return bin
 }
 
 // return sum of a slice of big.Ints
@@ -38,31 +39,31 @@ func elMulSlice(sl1, sl2 []*big.Int, q *big.Int) []*big.Int {
 }
 
 // compute the Hankel Matrix for items and (random) u.
-func ComputePlainHankelMatrix(items []uint64, u, q *big.Int, setting Setting) gm.Matrix {
-    u_list := make([]*big.Int, setting.m) // stores u^a^i for each a
-    u1_list := make([]*big.Int, setting.m) // stores u^a for each a
-    H, err := gm.NewMatrix(setting.T + 1, setting.T + 1, nil, gm.Bigint{})
+func ComputePlainHankelMatrix(items []*big.Int, u, q *big.Int, setting AHE_setting) gm.Matrix {
+    u_list := make([]*big.Int, setting.Items()) // stores u^a^i for each a
+    u1_list := make([]*big.Int, setting.Items()) // stores u^a for each a
+    H, err := gm.NewMatrix(setting.Threshold() + 1, setting.Threshold() + 1, nil, gm.Bigint{})
     if err != nil {panic(err)}
-    H.Set(0, 0, big.NewInt(int64(setting.m)))
+    H.Set(0, 0, big.NewInt(int64(setting.Items())))
     for i := range u1_list {
-        u1_list[i] = new(big.Int).Exp(u, new(big.Int).SetUint64(items[i]), q); // u^a mod q
+        u1_list[i] = new(big.Int).Exp(u, items[i], q); // u^a mod q
     }
     copy(u_list, u1_list)
     for i := 1; ; i += 1 { // each unique element in Hankel matrix
         var stopCol int
         var startCol int
-        if i <= setting.T {
+        if i <= setting.Threshold() {
             startCol = 0
             stopCol = i + 1
         } else {
-            startCol = i - setting.T
-            stopCol = setting.T + 1
+            startCol = i - setting.Threshold()
+            stopCol = setting.Threshold() + 1
         }
         el := sumSlice(u_list, q)
         for j := startCol; j < stopCol; j += 1 { // each matrix entry with current element
             H.Set(i-j, j, el)
         }
-        if i >= 2 * setting.T {
+        if i >= 2 * setting.Threshold() {
             break
         }
         u_list = elMulSlice(u_list, u1_list, q)
@@ -71,18 +72,18 @@ func ComputePlainHankelMatrix(items []uint64, u, q *big.Int, setting Setting) gm
 }
 
 // compute and encrypt the Hankel Matrix for items and (random) u.
-func ComputeHankelMatrix(items []uint64, u *big.Int, setting Setting) (gm.Matrix, error) {
-    H := ComputePlainHankelMatrix(items, u, setting.cs.N(), setting)
+func ComputeHankelMatrix(items []*big.Int, u *big.Int, setting AHE_setting) (gm.Matrix, error) {
+    H := ComputePlainHankelMatrix(items, u, setting.AHE_cryptosystem().N(), setting)
     return EncryptMatrix(H, setting)
 }
 
 // encrypt matrix item-wise
-func EncryptMatrix(a gm.Matrix, setting Setting) (b gm.Matrix, err error) {
+func EncryptMatrix(a gm.Matrix, setting AHE_setting) (b gm.Matrix, err error) {
     m, err := a.Apply(func(plain interface{}) (enc interface{}, err error) {
-        return setting.cs.Encrypt(plain.(*big.Int))
+        return setting.AHE_cryptosystem().Encrypt(plain.(*big.Int))
     })
     if err != nil {return}
-    m.Space = setting.cs.EvaluationSpace()
+    m.Space = setting.AHE_cryptosystem().EvaluationSpace()
     return m, nil
 }
 
@@ -94,7 +95,7 @@ func PartialDecryptMatrix(cipher gm.Matrix, Secret_key Secret_key) (part_mat gm.
 }
 
 // combine partial matrix decryptions to receive plaintext matrix
-func CombineMatrixShares(part_mat []gm.Matrix, setting Setting) (decrypted gm.Matrix, err error) {
+func CombineMatrixShares(part_mat []gm.Matrix, enc_mat gm.Matrix, setting AHE_setting) (decrypted gm.Matrix, err error) {
     decrypted, err = gm.NewMatrix(part_mat[0].Rows, part_mat[0].Cols, nil, gm.Bigint{}) //todo: space is partial decrypted; gpr det implementera add för partial space
     if err != nil {return}
     var dec *big.Int
@@ -105,7 +106,7 @@ func CombineMatrixShares(part_mat []gm.Matrix, setting Setting) (decrypted gm.Ma
                 el_vals[j], err = part_mat[j].At(row, col)
                 if err != nil {return}
             }
-            dec, err = setting.cs.CombinePartials(el_vals)
+            dec, err = setting.AHE_cryptosystem().CombinePartials(el_vals)
             if err != nil {return}
             decrypted.Set(row, col, dec)
         }
@@ -136,12 +137,12 @@ func SampleMatrix(rows, cols int, q *big.Int) (a gm.Matrix, err error) {
 }
 
 //step 1 of MMult
-func SampleRMatrices(a, b gm.Matrix, setting Setting) (RAi_plain, RAi_enc, RBi_plain, RBi_enc gm.Matrix, err error) {
-    RAi_plain, err = SampleMatrix(a.Rows, a.Cols, setting.cs.N())
+func SampleRMatrices(a, b gm.Matrix, setting AHE_setting) (RAi_plain, RAi_enc, RBi_plain, RBi_enc gm.Matrix, err error) {
+    RAi_plain, err = SampleMatrix(a.Rows, a.Cols, setting.AHE_cryptosystem().N())
     if err != nil {return}
     RAi_enc, err = EncryptMatrix(RAi_plain, setting)
     if err != nil {return}
-    RBi_plain, err = SampleMatrix(b.Rows, b.Cols, setting.cs.N())
+    RBi_plain, err = SampleMatrix(b.Rows, b.Cols, setting.AHE_cryptosystem().N())
     if err != nil {return}
     RBi_enc, err = EncryptMatrix(RBi_plain, setting)
     if err != nil {return}
@@ -149,7 +150,7 @@ func SampleRMatrices(a, b gm.Matrix, setting Setting) (RAi_plain, RAi_enc, RBi_p
 }
 
 // step 3 of MMult
-func GetCti(MA, MB, RA, RAi, RBi gm.Matrix, setting Setting, Secret_key Secret_key) (cti gm.Matrix, MA_part, MB_part gm.Matrix, err error) { //todo: partial
+func GetCti(MA, MB, RA, RAi, RBi gm.Matrix, setting AHE_setting, Secret_key Secret_key) (cti gm.Matrix, MA_part, MB_part gm.Matrix, err error) { //todo: partial
     prod1, err := RA.Multiply(RBi)
     if err != nil {
         return
@@ -180,56 +181,56 @@ func NbrMMultInstances(m gm.Matrix) int {
 }
 
 // step 3f of CTest-diff
-func SampleHMasks(setting Setting) {
-    SampleMatrix(1, 2*(setting.T+1), setting.cs.N())
+func SampleHMasks(setting AHE_setting) {
+    SampleMatrix(1, 2*(setting.Threshold()+1), setting.AHE_cryptosystem().N())
 }
 
 //Additive Secret Sharing
 
 //ASS, step 1
-func GetRandomEncrypted(setting Setting) (plain *big.Int, cipher Ciphertext, err error) {
-    plain, err = SampleInt(setting.cs.N())
+func GetRandomEncrypted(setting AHE_setting) (plain *big.Int, cipher Ciphertext, err error) {
+    plain, err = SampleInt(setting.AHE_cryptosystem().N())
     if err != nil {return}
-    cipher, err = setting.cs.Encrypt(plain)
+    cipher, err = setting.AHE_cryptosystem().Encrypt(plain)
     return
 }
 
 //ASS, step 5 & 6
-func SumMasksDecrypt(a Ciphertext, ds []Ciphertext, sk Secret_key, setting Setting) (e_partial Partial_decryption, err error) {
+func SumMasksDecrypt(a Ciphertext, ds []Ciphertext, sk Secret_key, setting AHE_setting) (e_partial Partial_decryption, err error) {
     for _, val := range ds {
-        a, err = setting.cs.Add(a, val)
+        a, err = setting.AHE_cryptosystem().Add(a, val)
         if err != nil {return}
     }
-    return sk.PartialDecrypt(a)
+    a_dec, err := sk.PartialDecrypt(a)
+    return a_dec, err
 }
 
 //ASS, step 7
-func NegateValue(d *big.Int, setting Setting) *big.Int {
+func NegateValue(d *big.Int, setting AHE_setting) *big.Int {
     neg := new(big.Int)
     neg.Neg(d)
-    neg.Mod(neg, setting.cs.N())
+    neg.Mod(neg, setting.AHE_cryptosystem().N())
     return neg
 }
 
 //Multiplication
 
 //Mult, step 6
-func SumSlice(values []Ciphertext, setting Setting) (sum Ciphertext, err error) {
+func SumSlice(values []Ciphertext, setting AHE_setting) (sum Ciphertext, err error) {
     sum = values[0]
-    for i := 1; i < setting.n; i += 1 {
-        sum, err = setting.cs.Add(sum, values[i])
+    for i := 1; i < setting.Parties(); i += 1 {
+        sum, err = setting.AHE_cryptosystem().Add(sum, values[i])
         if err != nil {return}
     }
     return
 }
 
 // evaluate polynomial p at point x
-func EvalPoly(p gm.Matrix, x uint64, mod *big.Int) *big.Int {
+func EvalPoly(p gm.Matrix, x, mod *big.Int) *big.Int {
     val, err := decodeBI(p.At(0,0))
     if err != nil {panic(err)}
     sum := new(big.Int).Set(val)
-    xb := new(big.Int).SetUint64(x)
-    x_raised := new(big.Int).Set(xb)
+    x_raised := new(big.Int).Set(x)
     term := new(big.Int)
     for i := 1; ; i += 1 {
         val, err := decodeBI(p.At(0,i))
@@ -239,7 +240,7 @@ func EvalPoly(p gm.Matrix, x uint64, mod *big.Int) *big.Int {
         if i >= p.Cols-1 {
             break
         }
-        x_raised.Mul(x_raised, xb)
+        x_raised.Mul(x_raised, x)
     }
     return sum.Mod(sum, mod)
 }
@@ -265,14 +266,14 @@ func MultPoly(p1, p2 gm.Matrix) gm.Matrix {
     return new_poly
 }
 
-func PolyFromRoots(roots []uint64, mod *big.Int) gm.Matrix {
+func PolyFromRoots(roots []*big.Int, mod *big.Int) gm.Matrix {
     n := new(big.Int)
-    n.SetUint64(roots[0]).Neg(n)
+    n.Set(roots[0]).Neg(n)
     poly, err := gm.NewMatrix(1,2,[]interface{}{n, big.NewInt(1)}, gm.Bigint{})
     if err != nil {panic(err)}
     for i := 1; i < len(roots); i += 1 {
         n = new(big.Int)
-        n.SetUint64(roots[i]).Neg(n)
+        n.Set(roots[i]).Neg(n)
         root, err := gm.NewMatrix(1, 2, []interface{}{n, big.NewInt(1)}, gm.Bigint{})
         if err != nil {panic(err)}
         poly = MultPoly(poly, root)
@@ -285,9 +286,9 @@ func PolyFromRoots(roots []uint64, mod *big.Int) gm.Matrix {
 }
 
 // step 4 of TPSI-diff
-func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
+func Interpolation(vs, ps gm.Matrix, setting AHE_setting) gm.Matrix {
 
-    sample_max := setting.T * 3 + 4
+    sample_max := setting.Threshold() * 3 + 4
     space := gm.Bigint{}
     
     // calculate q
@@ -295,7 +296,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
     for i := range q_vals {
         ps_val, err := decodeBI(ps.At(0,i))
         if err != nil {panic(err)}
-        current_q := new(big.Int).ModInverse(ps_val, setting.cs.N())
+        current_q := new(big.Int).ModInverse(ps_val, setting.AHE_cryptosystem().N())
         vs_val, err := decodeBI(vs.At(0,i))
         q_vals[i] = current_q.Mul(current_q, vs_val)
     }
@@ -314,8 +315,8 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         
         // populate rel_row with full equation
         j := 0
-        for ; j <= setting.T * 2 + 2; j += 1 { // length of V(x)
-            coeff.Set(x_pow).Mod(coeff, setting.cs.N())
+        for ; j <= setting.Threshold() * 2 + 2; j += 1 { // length of V(x)
+            coeff.Set(x_pow).Mod(coeff, setting.AHE_cryptosystem().N())
             eq.Set(0, j, new(big.Int).Set(coeff))
             x_pow.Mul(x_pow, x)
         }
@@ -323,7 +324,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         for ; j <= sample_max; j += 1 { // length of p'(x)
             q_val, err := decodeBI(q.At(0, coeff_pos))
             if err != nil {panic(err)}
-            coeff.Mul(q_val, x_pow).Neg(coeff).Mod(coeff, setting.cs.N())
+            coeff.Mul(q_val, x_pow).Neg(coeff).Mod(coeff, setting.AHE_cryptosystem().N())
             eq.Set(0, j, new(big.Int).Set(coeff))
             x_pow.Mul(x_pow, x)
         }
@@ -337,7 +338,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
             if err != nil {panic(err)}
             eq.Set(0, prev_coeff, big.NewInt(0))
             eq, err = eq.Apply(func(val interface{}) (interface{}, error) {
-                return new(big.Int).Mod(val.(*big.Int), setting.cs.N()), nil
+                return new(big.Int).Mod(val.(*big.Int), setting.AHE_cryptosystem().N()), nil
             })
             if err != nil {panic(err)}
         }
@@ -354,7 +355,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         if err != nil {panic(err)}
         this_coeff, err := decodeBI(eq.At(0, coeff_pos))
         if err != nil {panic(err)}
-        coeff_inv := new(big.Int).ModInverse(this_coeff, setting.cs.N())
+        coeff_inv := new(big.Int).ModInverse(this_coeff, setting.AHE_cryptosystem().N())
         rem_coeff := 0
         for ; rem_coeff < coeff_pos + 1; rem_coeff += 1 {
             rel_row.Set(0, rem_coeff, new(big.Int).SetInt64(0))
@@ -363,7 +364,7 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
             rem, err := decodeBI(eq.At(0, rem_coeff))
             if err != nil {panic(err)}
             rel := new(big.Int).Neg(rem)
-            rel.Mul(rel, coeff_inv).Mod(rel, setting.cs.N())
+            rel.Mul(rel, coeff_inv).Mod(rel, setting.AHE_cryptosystem().N())
             rel_row.Set(0, rem_coeff, rel)
         }
         
@@ -379,22 +380,22 @@ func Interpolation(vs, ps gm.Matrix, setting Setting) gm.Matrix {
         for known_coeff := solving_coeff + 1; known_coeff <= coeff_pos; known_coeff += 1 {
             rel_s, err := decodeBI(relations[solving_coeff].At(0, known_coeff))
             if err != nil {panic(err)}
-            coeff.Add(coeff, new(big.Int).Mul(rel_s, interpolated_coeffs[known_coeff].(*big.Int))).Mod(coeff, setting.cs.N())
+            coeff.Add(coeff, new(big.Int).Mul(rel_s, interpolated_coeffs[known_coeff].(*big.Int))).Mod(coeff, setting.AHE_cryptosystem().N())
         }
         interpolated_coeffs[solving_coeff] = coeff
     }
 
-    den := interpolated_coeffs[setting.T * 2 + 3:coeff_pos + 1]
+    den := interpolated_coeffs[setting.Threshold() * 2 + 3:coeff_pos + 1]
     int_poly, err := gm.NewMatrix(1, len(den), den, space) 
     return int_poly
 }
 
-func IsRoot(poly gm.Matrix, x uint64, mod *big.Int) bool {
+func IsRoot(poly gm.Matrix, x *big.Int, mod *big.Int) bool {
     return EvalPoly(poly, x, mod).Cmp(big.NewInt(0)) == 0
 }
 
-func RootMask(root_poly gm.Matrix, setting Setting) (gm.Matrix) {
-    r, err := SampleInt(setting.cs.N())
+func RootMask(root_poly gm.Matrix, setting AHE_setting) (gm.Matrix) {
+    r, err := SampleInt(setting.AHE_cryptosystem().N())
     if err != nil {panic(err)}
     random_root, err := gm.NewMatrix(1, 2, []interface{}{r, big.NewInt(1)}, root_poly.Space)
     if err != nil {panic(err)}
@@ -402,10 +403,10 @@ func RootMask(root_poly gm.Matrix, setting Setting) (gm.Matrix) {
     return root_poly
 }
 
-func EvalIntPolys(root_poly gm.Matrix, sample_max int, setting Setting) (R_values_enc, R_tilde_values, p_values gm.Matrix) {
-    R, err := SampleMatrix(1, setting.T+1, setting.cs.N())
+func EvalIntPolys(root_poly gm.Matrix, sample_max int, setting AHE_setting) (R_values_enc, R_tilde_values, p_values gm.Matrix) {
+    R, err := SampleMatrix(1, setting.Threshold()+1, setting.AHE_cryptosystem().N())
     if err != nil {panic(err)}
-    R_tilde, err := SampleMatrix(1, setting.T+1, setting.cs.N())
+    R_tilde, err := SampleMatrix(1, setting.Threshold()+1, setting.AHE_cryptosystem().N())
     if err != nil {panic(err)}
     R_values, err := gm.NewMatrix(1, sample_max, nil, gm.Bigint{})
     if err != nil {panic(err)}
@@ -414,18 +415,18 @@ func EvalIntPolys(root_poly gm.Matrix, sample_max int, setting Setting) (R_value
     p_values, err = gm.NewMatrix(1, sample_max, nil, gm.Bigint{})
     if err != nil {panic(err)}
     for i := 0; i < sample_max; i += 1 {
-        x := uint64(i*2+1)
-        R_values.Set(0, i, EvalPoly(R, x, setting.cs.N()))
-        R_tilde_values.Set(0, i, EvalPoly(R_tilde, x, setting.cs.N()))
-        p_values.Set(0, i, EvalPoly(root_poly, x, setting.cs.N()))
+        x := big.NewInt(int64(i*2+1))
+        R_values.Set(0, i, EvalPoly(R, x, setting.AHE_cryptosystem().N()))
+        R_tilde_values.Set(0, i, EvalPoly(R_tilde, x, setting.AHE_cryptosystem().N()))
+        p_values.Set(0, i, EvalPoly(root_poly, x, setting.AHE_cryptosystem().N()))
     }
     R_values_enc, err = EncryptMatrix(R_values, setting)
     if err != nil {panic(err)}
     return
 }
 
-func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max int, setting Setting) gm.Matrix {
-    v, err := gm.NewMatrix(1, sample_max, nil, setting.cs.EvaluationSpace())
+func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max int, setting AHE_setting) gm.Matrix {
+    v, err := gm.NewMatrix(1, sample_max, nil, setting.AHE_cryptosystem().EvaluationSpace())
     if err != nil {panic(err)}
     R_tilde_values_enc, err := EncryptMatrix(R_tilde_values, setting)
     if err != nil {panic(err)}
@@ -436,7 +437,7 @@ func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max i
         if err != nil {panic(err)}
         p_val, err := decodeBI(p_values.At(0,i))
         if err != nil {panic(err)}
-        val, err := setting.cs.Scale(mask_val, p_val)
+        val, err := setting.AHE_cryptosystem().Scale(mask_val, p_val)
         if err != nil {panic(err)}
         v.Set(0, i, val)
     }

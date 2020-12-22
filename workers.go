@@ -6,18 +6,18 @@ import (
     gm "github.com/ontanj/generic-matrix"
 )
 
-func CentralASSWorker(a Ciphertext, sk Secret_key, setting Setting, channels []chan interface{}) *big.Int {
-    self := setting.n-1
+func CentralASSWorker(a Ciphertext, sk Secret_key, setting AHE_setting, channels []chan interface{}) *big.Int {
+    self := setting.Parties()-1
 
     // step 1: sample d
     d_plain, d_enc, err := GetRandomEncrypted(setting)
     if err != nil {panic(err)}
     
     // receive all_d
-    all_d := make([]Ciphertext, setting.n)
+    all_d := make([]Ciphertext, setting.Parties())
     all_d[self] = d_enc
     for i := 0; i < self; i += 1 {
-        all_d[i] = (<-channels[i]).(*big.Int)
+        all_d[i] = (<-channels[i]).(Ciphertext)
     }
 
     // send all_d
@@ -30,13 +30,13 @@ func CentralASSWorker(a Ciphertext, sk Secret_key, setting Setting, channels []c
     if err != nil {panic(err)}
     
     // receive e_parts
-    e_parts := make([]Partial_decryption, setting.n)
+    e_parts := make([]Partial_decryption, setting.Parties())
     e_parts[self] = e_partial
-    for i := 0; i < setting.n-1; i += 1 {
+    for i := 0; i < setting.Parties()-1; i += 1 {
         e_parts[i] = (<-channels[i]).(Partial_decryption)
     }
 
-    e, err := setting.cs.CombinePartials(e_parts)
+    e, err := setting.AHE_cryptosystem().CombinePartials(e_parts)
     if err != nil {
         panic(err)
     }
@@ -46,7 +46,7 @@ func CentralASSWorker(a Ciphertext, sk Secret_key, setting Setting, channels []c
     return a_share
 }
 
-func OuterASSWorker(a Ciphertext, sk Secret_key, setting Setting, channel chan interface{}) *big.Int {
+func OuterASSWorker(a Ciphertext, sk Secret_key, setting AHE_setting, channel chan interface{}) *big.Int {
     
     // step 1: sample d
     d_plain, d_enc, err := GetRandomEncrypted(setting)
@@ -69,20 +69,20 @@ func OuterASSWorker(a Ciphertext, sk Secret_key, setting Setting, channel chan i
     return a_share
 }
 
-func CentralMultWorker(a, b Ciphertext, sk Secret_key, setting Setting, channels []chan interface{}) Ciphertext {
-    self := setting.n-1
+func CentralMultWorker(a, b Ciphertext, sk Secret_key, setting AHE_setting, channels []chan interface{}) Ciphertext {
+    self := setting.Parties()-1
 
     a_share := CentralASSWorker(a, sk, setting, channels)
 
     // step 2: partial multiplication
-    prod, err := setting.cs.Scale(b, a_share)
+    prod, err := setting.AHE_cryptosystem().Scale(b, a_share)
     if err != nil {panic(err)}
 
     // receive partial_prods
-    partial_prods := make([]Ciphertext, setting.n)
+    partial_prods := make([]Ciphertext, setting.Parties())
     partial_prods[self] = prod
     for i := 0; i < self; i += 1 {
-        partial_prods[i] = (<-channels[i]).(*big.Int)
+        partial_prods[i] = (<-channels[i]).(Ciphertext)
     }
 
     // send partial_prods
@@ -97,12 +97,12 @@ func CentralMultWorker(a, b Ciphertext, sk Secret_key, setting Setting, channels
     return sum
 }
 
-func OuterMultWorker(a, b Ciphertext, sk Secret_key, setting Setting, channel chan interface{}) Ciphertext {
+func OuterMultWorker(a, b Ciphertext, sk Secret_key, setting AHE_setting, channel chan interface{}) Ciphertext {
     
     a_share := OuterASSWorker(a, sk, setting, channel)
     
     // step 2: partial multiplication    
-    prod, err := setting.cs.Scale(b, a_share)
+    prod, err := setting.AHE_cryptosystem().Scale(b, a_share)
     if err != nil {panic(err)}
 
     // broadcast prod
@@ -118,12 +118,12 @@ func OuterMultWorker(a, b Ciphertext, sk Secret_key, setting Setting, channel ch
     return sum
 }
 
-func CentralDecryptionWorker(cipher Ciphertext, sk Secret_key, setting Setting, channels []chan interface{}) *big.Int {
-    self := setting.n-1
+func CentralDecryptionWorker(cipher Ciphertext, sk Secret_key, setting AHE_setting, channels []chan interface{}) *big.Int {
+    self := setting.Parties()-1
     partial, err := sk.PartialDecrypt(cipher)
     if err != nil {panic(err)}
 
-    ds := make([]Partial_decryption, setting.n)
+    ds := make([]Partial_decryption, setting.Parties())
     ds[self] = partial
 
     for i := 0; i < self; i += 1 {
@@ -133,14 +133,14 @@ func CentralDecryptionWorker(cipher Ciphertext, sk Secret_key, setting Setting, 
     for i := 0; i < self; i += 1 {
         channels[i] <- ds
     }
-
-    plain, err := setting.cs.CombinePartials(ds)
+    
+    plain, err := setting.AHE_cryptosystem().CombinePartials(ds)
     if err != nil {panic(err)}
-
+    
     return plain
 }
 
-func OuterDecryptionWorker(cipher Ciphertext, sk Secret_key, setting Setting, channel chan interface{}) *big.Int {
+func OuterDecryptionWorker(cipher Ciphertext, sk Secret_key, setting AHE_setting, channel chan interface{}) *big.Int {
     partial, err := sk.PartialDecrypt(cipher)
     if err != nil {panic(err)}
 
@@ -148,22 +148,22 @@ func OuterDecryptionWorker(cipher Ciphertext, sk Secret_key, setting Setting, ch
 
     ds := (<-channel).([]Partial_decryption)
 
-    plain, err := setting.cs.CombinePartials(ds)
+    plain, err := setting.AHE_cryptosystem().CombinePartials(ds)
     if err != nil {panic(err)}
 
     return plain
 }
 
-func CentralZeroTestWorker(a Ciphertext, sk Secret_key, setting Setting, channels []chan interface{}) bool {
-    self := setting.n-1
+func CentralZeroTestWorker(a Ciphertext, sk Secret_key, setting AHE_setting, channels []chan interface{}) bool {
+    self := setting.Parties()-1
     
-    plain_mask, err := SampleInt(setting.cs.N())
+    plain_mask, err := SampleInt(setting.AHE_cryptosystem().N())
     if err != nil {panic(err)}
 
-    mask, err := setting.cs.Encrypt(plain_mask)
+    mask, err := setting.AHE_cryptosystem().Encrypt(plain_mask)
     if err != nil {panic(err)}
     
-    masks := make([]Ciphertext, setting.n)
+    masks := make([]Ciphertext, setting.Parties())
     masks[self] = mask
     for i := 0; i < self; i += 1 {
         masks[i] = (<-channels[i]).(Ciphertext)
@@ -183,12 +183,12 @@ func CentralZeroTestWorker(a Ciphertext, sk Secret_key, setting Setting, channel
     return pred.Cmp(big.NewInt(0)) == 0    
 }
 
-func OuterZeroTestWorker(a Ciphertext, sk Secret_key, setting Setting, channel chan interface{}) bool {
+func OuterZeroTestWorker(a Ciphertext, sk Secret_key, setting AHE_setting, channel chan interface{}) bool {
 
-    plain_mask, err := SampleInt(setting.cs.N())
+    plain_mask, err := SampleInt(setting.AHE_cryptosystem().N())
     if err != nil {panic(err)}
 
-    mask, err := setting.cs.Encrypt(plain_mask)
+    mask, err := setting.AHE_cryptosystem().Encrypt(plain_mask)
     if err != nil {panic(err)}
 
     channel <- mask
@@ -207,7 +207,7 @@ func OuterZeroTestWorker(a Ciphertext, sk Secret_key, setting Setting, channel c
 //  * q denominator
 //  * r numerator
 //  * r denominator (slice of size 1 as all coefficents share denominator)
-func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (gm.Matrix, gm.Matrix, gm.Matrix, Ciphertext) {
+func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret_key, setting AHE_setting, channels []chan interface{}, channel chan interface{}) (gm.Matrix, gm.Matrix, gm.Matrix, Ciphertext) {
     zeroTest := func (val Ciphertext) bool {
         if channels != nil {
             return CentralZeroTestWorker(val, sk, setting, channels)
@@ -240,7 +240,7 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
         }
     }
     ql := 1+la-lb
-    randomizers := exchangeRandomizers(channels, channel, 2*ql, setting.cs.N())
+    randomizers := exchangeRandomizers(channels, channel, 2*ql, setting.AHE_cryptosystem().N())
     a_num := a
     q_num, err := EncryptedFixedZeroMatrix(1, ql, randomizers[:ql], setting)
     if err != nil {panic(err)}
@@ -298,7 +298,6 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
         r_den := multiply(a_den, p_den)
 
         // subtract r2 = r1 - p
-        // randomizers = exchangeRandomizers(channels, channel, p_num.Cols, setting.cs.N())
         if channels != nil {
             r_num = divSub(r_num, p_num, setting)
             for _, ch := range channels {
@@ -347,28 +346,28 @@ func exchangeRandomizers(channels []chan interface{}, channel chan interface{}, 
 }
 
 // subtracts encrypted polynomials r - p, where deg(r) >= deg(p)
-func divSub(r, p gm.Matrix,setting Setting) gm.Matrix {
+func divSub(r, p gm.Matrix,setting AHE_setting) gm.Matrix {
     pos_diff := r.Cols-p.Cols
     for i := 0; i < p.Cols; i += 1 {
         p_val, err := decodeBI(p.At(0,i))
         if err != nil {panic(err)}
-        neg, err := setting.cs.Scale(p_val, big.NewInt(-1))
+        neg, err := setting.AHE_cryptosystem().Scale(p_val, big.NewInt(-1))
         if err != nil {panic(err)}
         r_val, err := decodeBI(r.At(0, i+pos_diff))
         if err != nil {panic(err)}
-        diff, err := setting.cs.Add(r_val, neg)
+        diff, err := setting.AHE_cryptosystem().Add(r_val, neg)
         if err != nil {panic(err)}
         r.Set(0, i+pos_diff, diff)
     }
     return r
 }
 
-func MinPolyWorker(seq gm.Matrix, rec_ord int, sk Secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (gm.Matrix, gm.Matrix) {
+func MinPolyWorker(seq gm.Matrix, rec_ord int, sk Secret_key, setting AHE_setting, channels []chan interface{}, channel chan interface{}) (gm.Matrix, gm.Matrix) {
 
     // create r0
-    randomizers := exchangeRandomizers(channels, channel, 8+seq.Cols, setting.cs.N())
+    randomizers := exchangeRandomizers(channels, channel, 8+seq.Cols, setting.AHE_cryptosystem().N())
     ri := 0
-    coeff, err := setting.cs.EncryptFixed(big.NewInt(1), randomizers[ri])
+    coeff, err := setting.AHE_cryptosystem().EncryptFixed(big.NewInt(1), randomizers[ri])
     ri += 1
     al := seq.Cols + 1
     a, err := EncryptedFixedZeroMatrix(1, al, randomizers[ri:ri+al], setting)
@@ -376,13 +375,13 @@ func MinPolyWorker(seq gm.Matrix, rec_ord int, sk Secret_key, setting Setting, c
     ri += al
     a.Set(0, seq.Cols, coeff)
 
-    a_den, err := setting.cs.EncryptFixed(big.NewInt(1), randomizers[ri])
+    a_den, err := setting.AHE_cryptosystem().EncryptFixed(big.NewInt(1), randomizers[ri])
     if err != nil {panic(err)}
     ri += 1
 
     // create r1
     b := seq
-    b_den, err := setting.cs.EncryptFixed(big.NewInt(1), randomizers[ri])
+    b_den, err := setting.AHE_cryptosystem().EncryptFixed(big.NewInt(1), randomizers[ri])
     if err != nil {panic(err)}
     ri += 1
     
@@ -422,14 +421,14 @@ func MinPolyWorker(seq gm.Matrix, rec_ord int, sk Secret_key, setting Setting, c
     return t2_num, t2_den
 }
 
-func nextT(t0_num, t0_den, t1_num, t1_den, q_num, q_den gm.Matrix, sk Secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (t2_num, t2_den gm.Matrix, err error) {
+func nextT(t0_num, t0_den, t1_num, t1_den, q_num, q_den gm.Matrix, sk Secret_key, setting AHE_setting, channels []chan interface{}, channel chan interface{}) (t2_num, t2_den gm.Matrix, err error) {
     p_num, p_den, err := PolyMult(t1_num, t1_den, q_num, q_den, sk, setting, channels, channel)
     if err != nil {return}
     t2_num, t2_den, err = PolySub(t0_num, t0_den, p_num, p_den, sk, setting, channels, channel)
     return
 }
 
-func PolySub(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (diff_num, diff_den gm.Matrix, err error) {
+func PolySub(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting AHE_setting, channels []chan interface{}, channel chan interface{}) (diff_num, diff_den gm.Matrix, err error) {
     if a_num.Cols != a_den.Cols || b_num.Cols != b_den.Cols {
         panic("mismatched length of denominator")
     }
@@ -452,7 +451,7 @@ func PolySub(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting Settin
     }
     scale := func (a Ciphertext, factor *big.Int) Ciphertext {
         if channels != nil {
-            val, err := setting.cs.Scale(a, factor)
+            val, err := setting.AHE_cryptosystem().Scale(a, factor)
             if err != nil {panic(err)}
             for _, ch := range channels {
                 ch <- val
@@ -497,7 +496,7 @@ func PolySub(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting Settin
             if err != nil {return}
             long_b_num := multiply(b_num_val, a_den_val)
             neg := scale(long_b_num, big.NewInt(-1))
-            num, err = setting.cs.Add(long_a_num, neg)
+            num, err = setting.AHE_cryptosystem().Add(long_a_num, neg)
             if err != nil {return}
             diff_num.Set(0, i, num)
             den := multiply(a_den_val, b_den_val)
@@ -507,9 +506,9 @@ func PolySub(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting Settin
     return
 }
 
-func PolyMult(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting Setting, channels []chan interface{}, channel chan interface{}) (prod_num, prod_den gm.Matrix, err error) {
+func PolyMult(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting AHE_setting, channels []chan interface{}, channel chan interface{}) (prod_num, prod_den gm.Matrix, err error) {
     prod_len := a_num.Cols+b_num.Cols-1
-    randomizers := exchangeRandomizers(channels, channel, prod_len*2, setting.cs.N())
+    randomizers := exchangeRandomizers(channels, channel, prod_len*2, setting.AHE_cryptosystem().N())
     prod_num, err = EncryptedFixedZeroMatrix(1, prod_len, randomizers[:prod_len], setting)
     if err != nil {return}
     prod_den, err = EncryptedFixedOneMatrix(1, prod_num.Cols, randomizers[prod_len:], setting)
@@ -548,7 +547,7 @@ func PolyMult(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting Setti
             long_num := multiply(num, current_den)
             long_current_num := multiply(current_num, den)
             var new_num Ciphertext
-            new_num, err = setting.cs.Add(long_num, long_current_num)
+            new_num, err = setting.AHE_cryptosystem().Add(long_num, long_current_num)
             if err != nil {return}
             prod_num.Set(0, i+j, new_num)
             
@@ -559,39 +558,39 @@ func PolyMult(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting Setti
     return
 }
 
-func EncryptedFixedZeroMatrix(rows, cols int, randomizers []*big.Int, setting Setting) (m gm.Matrix, err error) {
+func EncryptedFixedZeroMatrix(rows, cols int, randomizers []*big.Int, setting AHE_setting) (m gm.Matrix, err error) {
     var val Ciphertext
     vals := make([]interface{}, rows*cols)
     for i := range vals {
-        val, err = setting.cs.EncryptFixed(big.NewInt(0), randomizers[i])
+        val, err = setting.AHE_cryptosystem().EncryptFixed(big.NewInt(0), randomizers[i])
         if err != nil {return}
         vals[i] = val
     }
-    return gm.NewMatrix(rows, cols, vals, setting.cs.EvaluationSpace())
+    return gm.NewMatrix(rows, cols, vals, setting.AHE_cryptosystem().EvaluationSpace())
 }
 
-func EncryptedFixedOneMatrix(rows, cols int, randomizers []*big.Int, setting Setting) (m gm.Matrix, err error) {
+func EncryptedFixedOneMatrix(rows, cols int, randomizers []*big.Int, setting AHE_setting) (m gm.Matrix, err error) {
     var val Ciphertext
     vals := make([]interface{}, rows*cols)
     for i := range vals {
-        val, err = setting.cs.EncryptFixed(big.NewInt(1), randomizers[i])
+        val, err = setting.AHE_cryptosystem().EncryptFixed(big.NewInt(1), randomizers[i])
         if err != nil {return}
         vals[i] = val
     }
-    return gm.NewMatrix(rows, cols, vals, setting.cs.EvaluationSpace())
+    return gm.NewMatrix(rows, cols, vals, setting.AHE_cryptosystem().EvaluationSpace())
 }
 
-func CentralMatrixMultiplicationWorker(a, b gm.Matrix, sk Secret_key, setting Setting, channels []chan interface{}) gm.Matrix {
+func CentralMatrixMultiplicationWorker(a, b gm.Matrix, sk Secret_key, setting AHE_setting, channels []chan interface{}) gm.Matrix {
     if a.Cols != b.Rows {
         panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", a.Rows, a.Cols, b.Rows, b.Cols))
     }
-    self := setting.n-1
+    self := setting.Parties()-1
     
     // step 1
     RAi_clear, RAi_crypt, RBi_clear, RBi_crypt, err := SampleRMatrices(a, b, setting)
     if err != nil {panic(err)}
-    RAs_crypt := make([]gm.Matrix, setting.n)
-    RBs_crypt := make([]gm.Matrix, setting.n)
+    RAs_crypt := make([]gm.Matrix, setting.Parties())
+    RBs_crypt := make([]gm.Matrix, setting.Parties())
     RAs_crypt[self] = RAi_crypt
     RBs_crypt[self] = RBi_crypt
     for i := 0; i < self; i += 1 {
@@ -611,9 +610,9 @@ func CentralMatrixMultiplicationWorker(a, b gm.Matrix, sk Secret_key, setting Se
     // step 3
     cti, MA_part, MB_part, err := GetCti(MA, MB, RA, RAi_clear, RBi_clear, setting, sk)
     if err != nil {panic(err)}
-    cts := make([]gm.Matrix, setting.n)
-    MA_parts := make([]gm.Matrix, setting.n)
-    MB_parts := make([]gm.Matrix, setting.n)
+    cts := make([]gm.Matrix, setting.Parties())
+    MA_parts := make([]gm.Matrix, setting.Parties())
+    MB_parts := make([]gm.Matrix, setting.Parties())
     cts[self] = cti
     MA_parts[self] = MA_part
     MB_parts[self] = MB_part
@@ -624,7 +623,7 @@ func CentralMatrixMultiplicationWorker(a, b gm.Matrix, sk Secret_key, setting Se
     }
 
     // step 4
-    AB, err := CombineMatrixMultiplication(MA_parts, MB_parts, cts, setting)
+    AB, err := CombineMatrixMultiplication(MA, MB, MA_parts, MB_parts, cts, setting)
     for i := 0; i < self; i += 1 {
         channels[i] <- AB
     }
@@ -633,7 +632,7 @@ func CentralMatrixMultiplicationWorker(a, b gm.Matrix, sk Secret_key, setting Se
 
 }
 
-func OuterMatrixMultiplicationWorker(a, b gm.Matrix, sk Secret_key, setting Setting, channel chan interface{}) gm.Matrix {
+func OuterMatrixMultiplicationWorker(a, b gm.Matrix, sk Secret_key, setting AHE_setting, channel chan interface{}) gm.Matrix {
     if a.Cols != b.Rows {
         panic(fmt.Errorf("matrices are not compatible: (%d, %d) x (%d, %d)", a.Rows, a.Cols, b.Rows, b.Cols))
     }
@@ -663,8 +662,8 @@ func OuterMatrixMultiplicationWorker(a, b gm.Matrix, sk Secret_key, setting Sett
 }
 
 // outputs true through return_channel if m is singular
-func CentralSingularityTestWorker(m gm.Matrix, sk Secret_key, setting Setting, channels []chan interface{}) bool {
-    self := setting.n-1
+func CentralSingularityTestWorker(m gm.Matrix, sk Secret_key, setting AHE_setting, channels []chan interface{}) bool {
+    self := setting.Parties()-1
     // step b
     v, err := SampleVVector(m, setting)
     if err != nil {panic(err)}
@@ -707,7 +706,7 @@ func CentralSingularityTestWorker(m gm.Matrix, sk Secret_key, setting Setting, c
 }
 
 // outputs true through return_channel if m is singular
-func OuterSingularityTestWorker(m gm.Matrix, sk Secret_key, setting Setting, channel chan interface{}) bool {
+func OuterSingularityTestWorker(m gm.Matrix, sk Secret_key, setting AHE_setting, channel chan interface{}) bool {
     // step b
     v := (<-channel).(gm.Matrix)
 
@@ -740,15 +739,15 @@ func OuterSingularityTestWorker(m gm.Matrix, sk Secret_key, setting Setting, cha
 }
 
 
-// returns true if number of elements not shared by all is <= setting.T
-func CentralCardinalityTestWorker(items []uint64, sk Secret_key, setting Setting, channels []chan interface{}) bool {
-    self := setting.n-1
-    u, err := SampleInt(setting.cs.N())
+// returns true if number of elements not shared by all is <= setting.Threshold()
+func CentralCardinalityTestWorker(items []*big.Int, sk Secret_key, setting AHE_setting, channels []chan interface{}) bool {
+    self := setting.Parties()-1
+    u, err := SampleInt(setting.AHE_cryptosystem().N())
     if err != nil {panic(err)}
     for i := 0; i < self; i += 1 {
         channels[i] <- u
     }
-    H, err := CPComputeHankelMatrix(items, u, setting.cs.N(), setting)
+    H, err := CPComputeHankelMatrix(items, u, setting.AHE_cryptosystem().N(), setting)
     if err != nil {panic(err)}
     for i := 0; i < self; i += 1 {
         Hi := (<-channels[i]).(gm.Matrix)
@@ -762,8 +761,8 @@ func CentralCardinalityTestWorker(items []uint64, sk Secret_key, setting Setting
     return CentralSingularityTestWorker(H, sk, setting, channels)
 }
 
-// returns true if number of elements not shared by all is <= setting.T
-func OuterCardinalityTestWorker(items []uint64, sk Secret_key, setting Setting, channel chan interface{}) bool {
+// returns true if number of elements not shared by all is <= setting.Threshold()
+func OuterCardinalityTestWorker(items []*big.Int, sk Secret_key, setting AHE_setting, channel chan interface{}) bool {
     u := (<-channel).(*big.Int)
     H1, err := ComputeHankelMatrix(items, u, setting)
     if err != nil {panic(err)}
@@ -774,16 +773,16 @@ func OuterCardinalityTestWorker(items []uint64, sk Secret_key, setting Setting, 
 }
 
 // step 3 of TPSI-diff
-func CentralIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting Setting, channels []chan interface{}) (gm.Matrix, gm.Matrix) {
-    sample_max := setting.T * 3 + 4
-    self := setting.n-1
+func CentralIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting AHE_setting, channels []chan interface{}) (gm.Matrix, gm.Matrix) {
+    sample_max := setting.Threshold() * 3 + 4
+    self := setting.Parties()-1
     
     // step a
     root_poly = RootMask(root_poly, setting)
     
     // step b
     R_values_enc, R_tilde_values, p_values := EvalIntPolys(root_poly, sample_max, setting)
-    all_R_values := make([]gm.Matrix, setting.n)
+    all_R_values := make([]gm.Matrix, setting.Parties())
     all_R_values[self] = R_values_enc
     for i := 0; i < self; i += 1 {
         all_R_values[i] = (<-channels[i]).(gm.Matrix)
@@ -792,7 +791,7 @@ func CentralIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting S
     // step c
     var party_values gm.Matrix
     var err error
-    for i := 0; i < setting.n; i += 1 {
+    for i := 0; i < setting.Parties(); i += 1 {
         party_slice := make([]interface{}, sample_max)
         for j := 0; j < sample_max; j += 1 {
             party_slice[j] = new(big.Int).SetInt64(0)
@@ -825,7 +824,7 @@ func CentralIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting S
     }
 
     // step f
-    partials := make([]gm.Matrix, setting.n)
+    partials := make([]gm.Matrix, setting.Parties())
     pm, err := PartialDecryptMatrix(v, sk)
     if err != nil {panic(err)}
     partials[self] = pm
@@ -834,7 +833,7 @@ func CentralIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting S
     }
 
     // step g
-    v, err = CombineMatrixShares(partials, setting)
+    v, err = CombineMatrixShares(partials, v, setting)
     if err != nil {panic(err)}
     for i := 0; i < self; i += 1 {
         channels[i] <- v
@@ -844,8 +843,8 @@ func CentralIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting S
 }
 
 // step 3 of TPSI-diff
-func OuterIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting Setting, channel chan interface{}) (gm.Matrix, gm.Matrix) {
-    sample_max := setting.T * 3 + 4
+func OuterIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting AHE_setting, channel chan interface{}) (gm.Matrix, gm.Matrix) {
+    sample_max := setting.Threshold() * 3 + 4
     
     // step a
     root_poly = RootMask(root_poly, setting)
@@ -875,8 +874,8 @@ func OuterIntersectionPolyWorker(root_poly gm.Matrix, sk Secret_key, setting Set
 }
 
 // returns two slices, shared elements & unique elements
-func IntersectionWorker(items []uint64, sk Secret_key, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]uint64, []uint64) {
-    root_poly := PolyFromRoots(items, setting.cs.N())
+func IntersectionWorker(items []*big.Int, sk Secret_key, setting AHE_setting, central bool, channels []chan interface{}, channel chan interface{}) ([]*big.Int, []*big.Int) {
+    root_poly := PolyFromRoots(items, setting.AHE_cryptosystem().N())
     var vs gm.Matrix
     var ps gm.Matrix
     if central {
@@ -886,10 +885,10 @@ func IntersectionWorker(items []uint64, sk Secret_key, setting Setting, central 
     }
     
     p := Interpolation(vs, ps, setting)
-    shared := make([]uint64, 0, len(items))
-    unique := make([]uint64, 0, len(items))
+    shared := make([]*big.Int, 0, len(items))
+    unique := make([]*big.Int, 0, len(items))
     for _, item := range items {
-        if IsRoot(p, item, setting.cs.N()) {
+        if IsRoot(p, item, setting.AHE_cryptosystem().N()) {
             unique = append(unique, item)
         } else {
             shared = append(shared, item)
@@ -900,7 +899,7 @@ func IntersectionWorker(items []uint64, sk Secret_key, setting Setting, central 
 }
 
 // returns two slices: shared elements & unique elements if cardinality test passes, otherwise nil, nil
-func TPSIdiffWorker(items []uint64, sk Secret_key, setting Setting, central bool, channels []chan interface{}, channel chan interface{}) ([]uint64, []uint64) {
+func TPSIdiffWorker(items []*big.Int, sk Secret_key, setting AHE_setting, central bool, channels []chan interface{}, channel chan interface{}) ([]*big.Int, []*big.Int) {
     var pred bool
     if central {
         pred = CentralCardinalityTestWorker(items, sk, setting, channels)
