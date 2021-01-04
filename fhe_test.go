@@ -390,25 +390,25 @@ func TestFHEInterpolation(t *testing.T) {
         }
     })
 }
-
+                        
 func TestFHECardinalityTest(t *testing.T) {
     settings, sk, channels := SetupTestN(4)
     n := settings[0].Parties()
     t.Run("passing cardinality test", func(t *testing.T) {
         for i := range settings {
-            settings[i].T = 3
+            settings[i].T = 4
         }
         ret := make(chan bool)
-        items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,10}),
-                              bigIntSlice([]int64{2,4,6,12,14}),
-                              bigIntSlice([]int64{2,4,6,16,18}),
-                              bigIntSlice([]int64{2,4,6,20,22})}
+        items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,12,16,26}),
+                              bigIntSlice([]int64{2,4,6,12,16,20,22}),
+                              bigIntSlice([]int64{2,4,6,16,20,22,24}),
+                              bigIntSlice([]int64{2,4,6,20,22,24,26})}
         go func() {
-            ret <- CentralFHECardinalityTestWorker(items[n-1], sk[n-1], settings[n-1], channels, nil)
+            ret <- CentralFHECardinalityTestWorker(items[n-1], sk[n-1], settings[n-1], channels)
         }()
         for i := range channels {
             go func(i int) {
-                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], settings[i], nil, channels[i])
+                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], settings[i], channels[i])
             }(i)
         }
         for _ = range items {
@@ -420,24 +420,106 @@ func TestFHECardinalityTest(t *testing.T) {
 
     t.Run("failing cardinality test", func(t *testing.T) {
         for i := range settings {
-            settings[i].T = 2
+            settings[i].T = 4
         }
         ret := make(chan bool)
-        items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,10,24}),
-                              bigIntSlice([]int64{2,4,6,12,14,26}),
-                              bigIntSlice([]int64{2,4,6,16,18,28}),
-                              bigIntSlice([]int64{2,4,6,20,22,30})}
+        items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,12,16,26,28}),
+                              bigIntSlice([]int64{2,4,6,12,16,20,22,24}),
+                              bigIntSlice([]int64{2,4,6,16,20,22,24,26}),
+                              bigIntSlice([]int64{2,4,6,20,22,24,26,28})}
         go func() {
-            ret <- CentralFHECardinalityTestWorker(items[n-1], sk[n-1], settings[n-1], channels, nil)
+            ret <- CentralFHECardinalityTestWorker(items[n-1], sk[n-1], settings[n-1], channels)
         }()
         for i := range channels {
             go func(i int) {
-                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], settings[i], nil, channels[i])
+                ret <- OuterFHECardinalityTestWorker(items[i], sk[i], settings[i], channels[i])
             }(i)
         }
         for _ = range items {
             if <-ret {
                 t.Error("cardinality test passed")
+            }
+        }
+    })
+}
+
+func TestTPSIint(t *testing.T) {
+    items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,10,12,14}),
+                          bigIntSlice([]int64{2,4,6,8,10,16,18}),
+                          bigIntSlice([]int64{2,4,6,8,12,20,22})}
+    n := 3
+    t.Run("pass cardinality test", func(t *testing.T) {
+        settings, sks, channels := SetupTestN(n)
+        no_unique := 3
+        no_shared := 4
+        for i := range settings {
+            settings[i].T = 3
+        }
+        returns := make([]chan []*big.Int, n)
+        for i := 0; i < n-1; i += 1 {
+            returns[i] = make(chan []*big.Int)
+            go func(i int) {
+                sh, uq := TPSIintWorker(items[i], sks[i], settings[i], false, nil, channels[i])
+                returns[i] <- sh
+                returns[i] <- uq
+            }(i)
+        }
+        returns[n-1] = make(chan []*big.Int)
+        go func() {
+            sh, uq := TPSIintWorker(items[n-1], sks[n-1], settings[n-1], true, channels, nil)
+            returns[n-1] <- sh
+            returns[n-1] <- uq
+        }()
+        for i := 0; i < n; i += 1 {
+            shared := <-returns[i]
+            if shared == nil {
+                t.Error("cardinality test failed")
+                continue
+            }
+            unique := <-returns[i]
+            if len(shared) != no_shared {
+                t.Errorf("wrong number of shared items, expected %d, got %d", no_shared, len(shared))
+            }
+            if len(unique) != no_unique {
+                t.Errorf("wrong number of unique items, expected %d, got %d", no_unique, len(unique))
+            }
+            for j := 0; j < no_shared; j += 1 {
+                if shared[j] != items[i][j] {
+                    t.Errorf("unexpected element in shared, expected %d, got %d", items[i][j], shared[j])
+                }
+            }
+            for j := 0; j < no_unique; j += 1 {
+                if unique[j] != items[i][j+no_shared] {
+                    t.Errorf("unexpected element in unique, expected %d, got %d", items[i][j+no_shared], unique[j])
+                }
+            }
+        }
+    })
+    t.Run("fail cardinality test", func(t *testing.T) {
+        settings, sks, channels := SetupTestN(n)
+        for i := range settings {
+            settings[i].T = 2
+        }
+        returns := make([]chan []*big.Int, n)
+        for i := 0; i < n-1; i += 1 {
+            returns[i] = make(chan []*big.Int)
+            go func(i int) {
+                sh, uq := TPSIintWorker(items[i], sks[i], settings[i], false, nil, channels[i])
+                returns[i] <- sh
+                returns[i] <- uq
+            }(i)
+        }
+        returns[n-1] = make(chan []*big.Int)
+        go func() {
+            sh, uq := TPSIintWorker(items[n-1], sks[n-1], settings[n-1], true, channels, nil)
+            returns[n-1] <- sh
+            returns[n-1] <- uq
+        }()
+        for i := 0; i < n; i += 1 {
+            shared := <-returns[i]
+            if shared != nil {
+                t.Error("cardinality test passed")
+                <-returns[i]
             }
         }
     })

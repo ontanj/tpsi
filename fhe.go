@@ -115,7 +115,7 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
             } else {
                 eq[j] = (<-channel).(Ciphertext)
             }
-            x_pow.Mul(x_pow, x)
+            x_pow.Mul(x_pow, x).Mod(x_pow, cs.N())
         }
         x_pow = big.NewInt(1)
         for ; j < sample_max + 1; j += 1 {
@@ -123,7 +123,7 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
             if err != nil {panic(err)}
             eq[j], err = cs.Multiply(q[coeff_pos], neg_x)
             if err != nil {panic(err)}
-            x_pow.Mul(x_pow, x)
+            x_pow.Mul(x_pow, x).Mod(x_pow, cs.N())
         }
 
         // substitue previous coefficents
@@ -167,7 +167,7 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
             if err != nil {panic(err)}
             rel_row[rem_coeff] = rel
         }
-
+        
         relations[coeff_pos] = rel_row
     }
 
@@ -202,7 +202,7 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
 }
 
 // returns true if cardinality test passes
-func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_setting, channels []chan interface{}, channel chan interface{}) bool {
+func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_setting, channels []chan interface{}) bool {
     cs := setting.FHE_cryptosystem()
 
     // step 2
@@ -277,10 +277,10 @@ func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FH
     interpol := FHEInterpolation(evals_sum, sk, setting, channels, nil)
     num := interpol[:setting.Threshold()+2]
     den := interpol[setting.Threshold()+2:]
-
+    
     num_eval := FHEEvaluate(z, num, setting)
     den_eval := FHEEvaluate(z, den, setting)
-
+    
     // compare interpolation with expected result
     den_inv := CentralInverseWorkerWithFactor(den_eval, new(big.Int).Sub(cs.N(), big.NewInt(1)), sk, setting, channels)
     int_eval, err := cs.Multiply(num_eval, den_inv)
@@ -293,7 +293,7 @@ func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FH
 }
 
 // returns true if cardinality test passes
-func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_setting, channels []chan interface{}, channel chan interface{}) bool {
+func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_setting, channel chan interface{}) bool {
     cs := setting.FHE_cryptosystem()
 
     // step 2
@@ -303,7 +303,7 @@ func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_
     rand, err := SampleInt(setting.FHE_cryptosystem().N())
     if err != nil {panic(err)}
     p := PolyFromRoots(append(items, rand), cs.N())
-
+    
     // evaluate root polynomial
     plain_evals := make([]*big.Int, 2*setting.Threshold()+3)
     evals := make([]Ciphertext, 2*setting.Threshold()+3)
@@ -353,7 +353,7 @@ func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_
 
     num_eval := FHEEvaluate(z, num, setting)
     den_eval := FHEEvaluate(z, den, setting)
-
+    
     // compare interpolation with expected result
     den_inv := OuterInverseWorkerWithFactor(den_eval, new(big.Int).Sub(cs.N(), big.NewInt(1)), sk, setting, channel)
     int_eval, err := cs.Multiply(num_eval, den_inv)
@@ -374,7 +374,24 @@ func FHEEvaluate(x *big.Int, poly []Ciphertext, setting FHE_setting) Ciphertext 
         if err != nil {panic(err)}
         sum, err = setting.FHE_cryptosystem().Add(sum, prod)
         if err != nil {panic(err)}
-        x_raised.Mul(x_raised, x)
+        x_raised.Mul(x_raised, x).Mod(x_raised, setting.FHE_cryptosystem().N())
     }
     return sum
+}
+
+// returns two slices: shared elements & unique elements if cardinality test passes, otherwise nil, nil
+func TPSIintWorker(items []*big.Int, sk Secret_key, setting FHE_setting, central bool, channels []chan interface{}, channel chan interface{}) ([]*big.Int, []*big.Int) {
+    var pred bool
+    if central {
+        pred = CentralFHECardinalityTestWorker(items, sk, setting, channels)
+    } else {
+        pred = OuterFHECardinalityTestWorker(items, sk, setting, channel)
+    }
+
+    // exit if cardinality test doesn't pass
+    if pred {
+        return IntersectionWorker(items, sk, setting, central, channels, channel)
+    } else {
+        return nil, nil
+    }
 }

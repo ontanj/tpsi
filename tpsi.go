@@ -90,7 +90,7 @@ func EncryptMatrix(a gm.Matrix, setting AHE_setting) (b gm.Matrix, err error) {
 // perform partial decryption for key share Secret_key
 func PartialDecryptMatrix(cipher gm.Matrix, Secret_key Secret_key) (part_mat gm.Matrix, err error) { //todo: wrap in PartialMatrix?
     return cipher.Apply(func(plain interface{}) (enc interface{}, err error) {
-        return Secret_key.PartialDecrypt(plain.(*big.Int))
+        return Secret_key.PartialDecrypt(plain.(Ciphertext))
     })
 }
 
@@ -433,7 +433,7 @@ func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max i
     all_masks, err := party_values.Add(R_tilde_values_enc)
     if err != nil {panic(err)}
     for i := 0; i < sample_max; i += 1 {
-        mask_val, err := decodeBI(all_masks.At(0,i))
+        mask_val, err := decodeC(all_masks.At(0,i))
         if err != nil {panic(err)}
         p_val, err := decodeBI(p_values.At(0,i))
         if err != nil {panic(err)}
@@ -447,4 +447,9 @@ func MaskRootPoly(p_values, party_values, R_tilde_values gm.Matrix, sample_max i
 func decodeBI(val interface{}, err error) (*big.Int, error) {
     if err != nil {return nil, err}
     return val.(*big.Int), nil
+}
+
+func decodeC(val interface{}, err error) (Ciphertext, error) {
+    if err != nil {return nil, err}
+    return val.(Ciphertext), nil
 }
