@@ -543,13 +543,13 @@ func TestMinPolyWorker(t *testing.T) {
     }
 
     go func() {
-        num, den := MinPolyWorker(seq, rec_ord, sks[setting.n-1], setting, channels, nil)
+        num, den := CentralMinPolyWorker(seq, rec_ord, sks[setting.n-1], setting, channels)
         returns[setting.n-1] <- num
         returns[setting.n-1] <- den
     }()
     for i := 0; i < setting.n-1; i += 1 {
         go func(i int) {
-            num, den := MinPolyWorker(seq, rec_ord, sks[i], setting, nil, channels[i])
+            num, den := OuterMinPolyWorker(seq, rec_ord, sks[i], setting, channels[i])
             returns[i] <- num
             returns[i] <- den
         }(i)
@@ -932,11 +932,7 @@ func TestEncryptedZeroMatrix(t *testing.T) {
     pk, sks, _ := NewDJCryptosystem(setting.n)
     setting.cs = pk
     l := 4
-    randomizers := make([]*big.Int, l)
-    for i := range randomizers {
-        randomizers[i], _ = SampleInt(setting.cs.N())
-    }
-    m, _ := EncryptedFixedZeroMatrix(1, l, randomizers, setting)
+    m, _ := EncryptedZeroMatrix(1, l, setting)
     channels := create_chans(setting.n-1)
     ret := make(chan *big.Int)
     for i := 0; i < m.Cols; i += 1 {

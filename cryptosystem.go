@@ -16,9 +16,6 @@ type AHE_Cryptosystem interface {
     // encrypt a plaintext message
     Encrypt(*big.Int) (Ciphertext, error)
 
-    // encrypt with a given randomizer
-    EncryptFixed(plaintext *big.Int, randomizer *big.Int) (Ciphertext, error)
-
     // combine partial decryptions to plaintext
     CombinePartials([]Partial_decryption) (*big.Int, error)
 
