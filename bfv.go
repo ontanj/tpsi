@@ -245,7 +245,7 @@ func CentralKeyGenerator(init BFV_init, channels []chan interface{}) (BFV_encryp
     rlkEphemSk := contextKeys.SampleTernaryMontgomeryNTTNew(1.0 / 3)
     rkgShareOne, rkgShareTwo, rkgShareThree := rkg.AllocateShares()
 
-    rkg.GenShareRoundOne(rlkEphemSk, sk.Get(), pk.crp, rkgShareOne)  //TODO
+    rkg.GenShareRoundOne(rlkEphemSk, sk.Get(), pk.crp, rkgShareOne)
 
     rkgCombined1, rkgCombined2, rkgCombined3 := rkg.AllocateShares()
     rkg.AggregateShareRoundOne(rkgShareOne, rkgCombined1, rkgCombined1)

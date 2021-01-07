@@ -17,7 +17,6 @@ func ConvertDJSKSlice(sks_in []DJ_secret_key) []Secret_key {
 func TestHankelMatrix(t *testing.T) {
     var setting AHESetting
     items := bigIntSlice([]int64{2, 3, 5})
-    setting.m = 3
     setting.T = 2
     setting.n = 4
     pk, _, err := NewDJCryptosystem(setting.n)

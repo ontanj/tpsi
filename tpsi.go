@@ -40,11 +40,12 @@ func elMulSlice(sl1, sl2 []*big.Int, q *big.Int) []*big.Int {
 
 // compute the Hankel Matrix for items and (random) u.
 func ComputePlainHankelMatrix(items []*big.Int, u, q *big.Int, setting AHE_setting) gm.Matrix {
-    u_list := make([]*big.Int, setting.Items()) // stores u^a^i for each a
-    u1_list := make([]*big.Int, setting.Items()) // stores u^a for each a
+    m := len(items)
+    u_list := make([]*big.Int, m) // stores u^a^i for each a
+    u1_list := make([]*big.Int, m) // stores u^a for each a
     H, err := gm.NewMatrix(setting.Threshold() + 1, setting.Threshold() + 1, nil, gm.Bigint{})
     if err != nil {panic(err)}
-    H.Set(0, 0, big.NewInt(int64(setting.Items())))
+    H.Set(0, 0, big.NewInt(int64(m)))
     for i := range u1_list {
         u1_list[i] = new(big.Int).Exp(u, items[i], q); // u^a mod q
     }

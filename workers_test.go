@@ -684,7 +684,6 @@ func TestCardinalityTestWorker(t *testing.T) {
         if err != nil {t.Error(err)}
         setting.cs = pk
         setting.T = 8
-        setting.m = 4
         all_items := make([][]*big.Int, setting.n)
         all_items[0] = bigIntSlice([]int64{1,2,5,6})
         all_items[1] = bigIntSlice([]int64{1,2,10,11})
@@ -717,7 +716,6 @@ func TestCardinalityTestWorker(t *testing.T) {
         if err != nil {t.Error(err)}
         setting.cs = pk
         setting.T = 7
-        setting.m = 6
         all_items := make([][]*big.Int, setting.n)
         all_items[0] = bigIntSlice([]int64{1,2,3,4,5,6})
         all_items[1] = bigIntSlice([]int64{1,2,3,4,10,11})
@@ -849,7 +847,6 @@ func TestIntersection(t *testing.T) {
 func TestTPSIdiff(t *testing.T) {
     var setting AHESetting
     setting.n = 3
-    setting.m = 7
     items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,10,12,14}),
                           bigIntSlice([]int64{2,4,6,8,10,16,18}),
                           bigIntSlice([]int64{2,4,6,8,12,20,22})}

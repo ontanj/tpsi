@@ -8,7 +8,6 @@ import (
 func TestCPHankelMatrix(t *testing.T) {
     var setting AHESetting
     items := []*big.Int{big.NewInt(2), big.NewInt(3), big.NewInt(5)}
-    setting.m = 3
     setting.T = 2
     setting.n = 4
     pk, djsks, err := NewDJCryptosystem(setting.n)
