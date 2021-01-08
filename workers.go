@@ -349,19 +349,6 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
     return q_num, q_den, a_num, a_den
 }
 
-func exchangeRandomizers(channels []chan interface{}, channel chan interface{}, n int, q *big.Int) []*big.Int {
-    if channels != nil {
-        randomizers, err := SampleSlice(n, q)
-        if err != nil {panic(err)}
-        for _, ch := range channels {
-            ch <- randomizers
-        }
-        return randomizers
-    } else {
-        return (<-channel).([]*big.Int)
-    }
-}
-
 // subtracts encrypted polynomials r - p, where deg(r) >= deg(p)
 func divSub(r, p gm.Matrix,setting AHE_setting) gm.Matrix {
     pos_diff := r.Cols-p.Cols
