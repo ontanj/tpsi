@@ -4,27 +4,22 @@ import (
     "math/big"
 )
 
-func CentralInverseWorker(a Ciphertext, sk Secret_key, setting FHE_setting, channels []chan interface{}) Ciphertext {
-    return CentralInverseWorkerWithFactor(a, big.NewInt(1), sk, setting, channels)
+func CentralInverseWorker(a Ciphertext, sk Secret_key, setting FHE_setting) Ciphertext {
+    return CentralInverseWorkerWithFactor(a, big.NewInt(1), sk, setting)
 }
 
-func CentralInverseWorkerWithFactor(a Ciphertext, factor *big.Int, sk Secret_key, setting FHE_setting, channels []chan interface{}) Ciphertext {
+func CentralInverseWorkerWithFactor(a Ciphertext, factor *big.Int, sk Secret_key, setting FHE_setting) Ciphertext {
     mask_clear, err := SampleInt(setting.FHE_cryptosystem().N())
     if err != nil {panic(err)}
     mask, err := setting.FHE_cryptosystem().Encrypt(mask_clear)
     if err != nil {panic(err)}
 
     // recieve all masks
-    masks := make([]Ciphertext, setting.Parties())
-    masks[setting.Parties()-1] = mask
-    for i, ch := range channels {
-        masks[i] = (<-ch).(Ciphertext)
-    }
+    masks := toCiphertextSlice(setting.ReceiveAll())
+    masks = append(masks, mask)
 
     // distribute all masks
-    for _, ch := range channels {
-        ch <- masks
-    }
+    setting.Distribute(masks)
 
     // multipy all masks
     mask = masks[0]
@@ -38,7 +33,7 @@ func CentralInverseWorkerWithFactor(a Ciphertext, factor *big.Int, sk Secret_key
     if err != nil {panic(err)}
 
     // decrypt and invert
-    ab := CentralDecryptionWorker(ab_enc, sk, setting, channels)
+    ab := CentralDecryptionWorker(ab_enc, sk, setting)
     ab.ModInverse(ab, setting.FHE_cryptosystem().N()).Mul(ab, factor)
     ab_inv_enc, err := setting.FHE_cryptosystem().Encrypt(ab)
     if err != nil {panic(err)}
@@ -49,21 +44,21 @@ func CentralInverseWorkerWithFactor(a Ciphertext, factor *big.Int, sk Secret_key
     return a_inv
 }
 
-func OuterInverseWorker(a Ciphertext, sk Secret_key, setting FHE_setting, channel chan interface{}) Ciphertext {
-    return OuterInverseWorkerWithFactor(a, big.NewInt(1), sk, setting, channel)
+func OuterInverseWorker(a Ciphertext, sk Secret_key, setting FHE_setting) Ciphertext {
+    return OuterInverseWorkerWithFactor(a, big.NewInt(1), sk, setting)
 }
 
-func OuterInverseWorkerWithFactor(a Ciphertext, factor *big.Int, sk Secret_key, setting FHE_setting, channel chan interface{}) Ciphertext {
+func OuterInverseWorkerWithFactor(a Ciphertext, factor *big.Int, sk Secret_key, setting FHE_setting) Ciphertext {
     mask_clear, err := SampleInt(setting.FHE_cryptosystem().N())
     if err != nil {panic(err)}
     mask, err := setting.FHE_cryptosystem().Encrypt(mask_clear)
     if err != nil {panic(err)}
 
     // send mask
-    channel <- mask
+    setting.Send(mask)
 
     // reieve all masks
-    masks := (<-channel).([]Ciphertext)
+    masks := (setting.Receive()).([]Ciphertext)
     
     // multiply all masks
     mask = masks[0]
@@ -77,7 +72,7 @@ func OuterInverseWorkerWithFactor(a Ciphertext, factor *big.Int, sk Secret_key, 
     if err != nil {panic(err)}
 
     // decrypt and invert
-    ab := OuterDecryptionWorker(ab_enc, sk, setting, channel)
+    ab := OuterDecryptionWorker(ab_enc, sk, setting)
     ab.ModInverse(ab, setting.FHE_cryptosystem().N()).Mul(ab, factor)
     ab_inv_enc, err := setting.FHE_cryptosystem().Encrypt(ab)
     if err != nil {panic(err)}
@@ -88,7 +83,7 @@ func OuterInverseWorkerWithFactor(a Ciphertext, factor *big.Int, sk Secret_key, 
     return a_inv
 }
 
-func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channels []chan interface{}, channel chan interface{}) []Ciphertext {
+func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting) []Ciphertext {
     sample_max := 2*setting.Threshold() + 3
     var err error
     cs := setting.FHE_cryptosystem()
@@ -106,14 +101,12 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
         // populate rel_row with full equation
         j := 0
         for ; j < setting.Threshold() + 2; j += 1 {
-            if channels != nil {
+            if setting.IsCentral() {
                 eq[j], err = cs.Encrypt(x_pow)
                 if err != nil {panic(err)}
-                for _, ch := range channels {
-                    ch <- eq[j]
-                }
+                setting.Distribute(eq[j])
             } else {
-                eq[j] = (<-channel).(Ciphertext)
+                eq[j] = (setting.Receive()).(Ciphertext)
             }
             x_pow.Mul(x_pow, x).Mod(x_pow, cs.N())
         }
@@ -140,12 +133,12 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
         }
         
         // if we get 0 = 0, we have all relations needed
-        if channels != nil {
-            if CentralZeroTestWorker(eq[coeff_pos], sk, setting, channels) {
+        if setting.IsCentral() {
+            if CentralZeroTestWorker(eq[coeff_pos], sk, setting) {
                 break
             }
         } else {
-            if OuterZeroTestWorker(eq[coeff_pos], sk, setting, channel) {
+            if OuterZeroTestWorker(eq[coeff_pos], sk, setting) {
                 break
             }
         }
@@ -153,10 +146,10 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
         // collect current coefficient
         rel_row := make([]Ciphertext, sample_max + 1)
         var coeff_inv Ciphertext
-        if channels != nil {
-            coeff_inv = CentralInverseWorkerWithFactor(eq[coeff_pos], new(big.Int).Sub(cs.N(),big.NewInt(1)), sk, setting, channels)
+        if setting.IsCentral() {
+            coeff_inv = CentralInverseWorkerWithFactor(eq[coeff_pos], new(big.Int).Sub(cs.N(),big.NewInt(1)), sk, setting)
         } else {
-            coeff_inv = OuterInverseWorkerWithFactor(eq[coeff_pos], new(big.Int).Sub(cs.N(),big.NewInt(1)), sk, setting, channel)
+            coeff_inv = OuterInverseWorkerWithFactor(eq[coeff_pos], new(big.Int).Sub(cs.N(),big.NewInt(1)), sk, setting)
         }
         rem_coeff := 0
         for ; rem_coeff < coeff_pos + 1; rem_coeff += 1 {
@@ -177,14 +170,12 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
     // solve all coefficients from relations
     for solving_coeff := coeff_pos - 1; solving_coeff >= 0; solving_coeff -= 1 {
         var coeff Ciphertext
-        if channels != nil {
+        if setting.IsCentral() {
             coeff, err = cs.Encrypt(big.NewInt(0))
             if err != nil {panic(err)}
-            for _, ch := range channels {
-                ch <- coeff
-            }
+            setting.Distribute(coeff)
         } else {
-            coeff = <-channel
+            coeff = (setting.Receive()).(Ciphertext)
         }
 
         if err != nil {panic(err)}
@@ -202,15 +193,13 @@ func FHEInterpolation(q []Ciphertext, sk Secret_key, setting FHE_setting, channe
 }
 
 // returns true if cardinality test passes
-func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_setting, channels []chan interface{}) bool {
+func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_setting) bool {
     cs := setting.FHE_cryptosystem()
 
     // step 2
     z, err := SampleInt(cs.N())
     if err != nil {panic(err)}
-    for _, ch := range channels {
-        ch <- z
-    }
+    setting.Distribute(z)
 
     // step 3
     // add mask to polynomial
@@ -235,20 +224,14 @@ func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FH
     if err != nil {panic(err)}
 
     // collect outer parties evaluations
-    all_evals := make([][]Ciphertext, setting.Parties())
-    all_evals[setting.Parties()-1] = evals
-    z_evals := make([]Ciphertext, setting.Parties())
-    z_evals[setting.Parties()-1] = z_eval
-    for i, ch := range channels {
-        all_evals[i] = (<-ch).([]Ciphertext)
-        z_evals[i] = (<-ch).(Ciphertext)
-    }
+    all_evals := toCiphertextSliceSlice(setting.ReceiveAll())
+    all_evals = append(all_evals, evals)
+    z_evals := toCiphertextSlice(setting.ReceiveAll())
+    z_evals = append(z_evals, z_eval)
 
     // distribute evaluations
-    for _, ch := range channels {
-        ch <- all_evals
-        ch <- z_evals
-    }
+    setting.Distribute(all_evals)
+    setting.Distribute(z_evals)
 
     // calculate expected z
     z_exp := z_evals[0]
@@ -274,7 +257,7 @@ func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FH
     }
     
     // interpolate
-    interpol := FHEInterpolation(evals_sum, sk, setting, channels, nil)
+    interpol := FHEInterpolation(evals_sum, sk, setting)
     num := interpol[:setting.Threshold()+2]
     den := interpol[setting.Threshold()+2:]
     
@@ -282,22 +265,22 @@ func CentralFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FH
     den_eval := FHEEvaluate(z, den, setting)
     
     // compare interpolation with expected result
-    den_inv := CentralInverseWorkerWithFactor(den_eval, new(big.Int).Sub(cs.N(), big.NewInt(1)), sk, setting, channels)
+    den_inv := CentralInverseWorkerWithFactor(den_eval, new(big.Int).Sub(cs.N(), big.NewInt(1)), sk, setting)
     int_eval, err := cs.Multiply(num_eval, den_inv)
     if err != nil {panic(err)}
 
     pred, err := cs.Add(int_eval, z_exp)
     if err != nil {panic(err)}
     
-    return CentralZeroTestWorker(pred, sk, setting, channels)
+    return CentralZeroTestWorker(pred, sk, setting)
 }
 
 // returns true if cardinality test passes
-func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_setting, channel chan interface{}) bool {
+func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_setting) bool {
     cs := setting.FHE_cryptosystem()
 
     // step 2
-    z := (<-channel).(*big.Int)
+    z := (setting.Receive()).(*big.Int)
 
     // step 3
     rand, err := SampleInt(setting.FHE_cryptosystem().N())
@@ -317,11 +300,11 @@ func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_
     eval := EvalPoly(p, z, cs.N())
     z_eval, err := cs.Encrypt(eval)
     if err != nil {panic(err)}
-    channel <- evals
-    channel <- z_eval
+    setting.Send(evals)
+    setting.Send(z_eval)
 
-    all_evals := (<-channel).([][]Ciphertext)
-    z_evals := (<-channel).([]Ciphertext)
+    all_evals := (setting.Receive()).([][]Ciphertext)
+    z_evals := (setting.Receive()).([]Ciphertext)
 
     // calculate expected z
     z_exp := z_evals[0]
@@ -347,7 +330,7 @@ func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_
     }
 
     // interpolate
-    interpol := FHEInterpolation(evals_sum, sk, setting, nil, channel)
+    interpol := FHEInterpolation(evals_sum, sk, setting)
     num := interpol[:setting.Threshold()+2]
     den := interpol[setting.Threshold()+2:]
 
@@ -355,14 +338,14 @@ func OuterFHECardinalityTestWorker(items []*big.Int, sk Secret_key, setting FHE_
     den_eval := FHEEvaluate(z, den, setting)
     
     // compare interpolation with expected result
-    den_inv := OuterInverseWorkerWithFactor(den_eval, new(big.Int).Sub(cs.N(), big.NewInt(1)), sk, setting, channel)
+    den_inv := OuterInverseWorkerWithFactor(den_eval, new(big.Int).Sub(cs.N(), big.NewInt(1)), sk, setting)
     int_eval, err := cs.Multiply(num_eval, den_inv)
     if err != nil {panic(err)}
     
     pred, err := cs.Add(int_eval, z_exp)
     if err != nil {panic(err)}
     
-    return OuterZeroTestWorker(pred, sk, setting, channel)       
+    return OuterZeroTestWorker(pred, sk, setting)       
 }
 
 func FHEEvaluate(x *big.Int, poly []Ciphertext, setting FHE_setting) Ciphertext {
@@ -380,17 +363,17 @@ func FHEEvaluate(x *big.Int, poly []Ciphertext, setting FHE_setting) Ciphertext 
 }
 
 // returns two slices: shared elements & unique elements if cardinality test passes, otherwise nil, nil
-func TPSIintWorker(items []*big.Int, sk Secret_key, setting FHE_setting, central bool, channels []chan interface{}, channel chan interface{}) ([]*big.Int, []*big.Int) {
+func TPSIintWorker(items []*big.Int, sk Secret_key, setting FHE_setting) ([]*big.Int, []*big.Int) {
     var pred bool
-    if central {
-        pred = CentralFHECardinalityTestWorker(items, sk, setting, channels)
+    if setting.IsCentral() {
+        pred = CentralFHECardinalityTestWorker(items, sk, setting)
     } else {
-        pred = OuterFHECardinalityTestWorker(items, sk, setting, channel)
+        pred = OuterFHECardinalityTestWorker(items, sk, setting)
     }
 
     // exit if cardinality test doesn't pass
     if pred {
-        return IntersectionWorker(items, sk, setting, central, channels, channel)
+        return IntersectionWorker(items, sk, setting)
     } else {
         return nil, nil
     }

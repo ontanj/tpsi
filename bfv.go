@@ -86,10 +86,6 @@ func (pk BFV_encryption) Encrypt(a *big.Int) (Ciphertext, error) {
     return BFV_ciphertext{msg: cipher, mult_counter: 0}, nil
 }
 
-func (pk BFV_encryption) EncryptFixed(plaintext *big.Int, randomizer *big.Int) (Ciphertext, error) {
-    panic("EncryptFixed not supported!")
-}
-
 func (pk BFV_encryption) CombinePartials(parts []Partial_decryption) (*big.Int, error) {
     pcks := dbfv.NewPCKSProtocol(pk.params, 3.19)
     pcksCombined := pcks.AllocateShares()

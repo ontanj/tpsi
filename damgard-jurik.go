@@ -25,10 +25,6 @@ func (pk DJ_encryption) Encrypt(plaintext *big.Int) (ciphertext Ciphertext, err 
     return
 }
 
-func (pk DJ_encryption) EncryptFixed(plaintext *big.Int, randomizer *big.Int) (ciphertext Ciphertext, err error) {
-    return pk.PubKey.EncryptFixed(plaintext, randomizer)
-}
-
 func (pk DJ_encryption) CombinePartials(parts []Partial_decryption) (plaintext *big.Int, err error) { 
     casted_parts := make([]*tcpaillier.DecryptionShare, len(parts))
     for i, p := range parts {
