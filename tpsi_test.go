@@ -14,36 +14,6 @@ func ConvertDJSKSlice(sks_in []DJ_secret_key) []Secret_key {
     return sks_out
 }
 
-func TestHankelMatrix(t *testing.T) {
-    var setting AHESetting
-    items := bigIntSlice([]int64{2, 3, 5})
-    setting.T = 2
-    setting.n = 4
-    pk, _, err := NewDJCryptosystem(setting.n)
-    if err != nil {t.Error(err)}
-    setting.cs = pk
-    q := big.NewInt(11)
-    u := big.NewInt(6)
-    H := ComputePlainHankelMatrix(items, u, q, setting)
-    H_corr := []int64{3,9,4,9,4,6,4,6,8}
-    t.Run("check dimensions", func(t *testing.T){
-        if H.Rows != setting.T + 1 || H.Cols != setting.T + 1 {
-            t.Error("wrong dimensions")
-        }
-    })
-    t.Run("check elements", func(t *testing.T){
-        for i := 0; i < 3; i += 1 {
-            for j := 0; j < 3; j += 1 {
-                h_val, err := decodeBI(H.At(i,j))
-                if err != nil {t.Error(err)}
-                if h_val.Cmp(new(big.Int).SetInt64(H_corr[i*3 + j])) != 0 {
-                    t.Error("incorrect values")
-                }
-            }
-        }
-    })
-}
-
 func TestEncryptValue(t *testing.T) {
     var setting AHESetting
     pk, sks, err := NewDJCryptosystem(4)

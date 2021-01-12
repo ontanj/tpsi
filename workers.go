@@ -763,14 +763,12 @@ func OuterSingularityTestWorker(m gm.Matrix, sk Secret_key, setting AHE_setting)
     return OuterZeroTestWorker(zero_t, sk, setting)
 }
 
-
-// returns true if number of elements not shared by all is <= setting.Threshold()
-func CentralCardinalityTestWorker(items []*big.Int, sk Secret_key, setting AHE_setting) bool {
+func CentralHankelMatrix(items []*big.Int, sk Secret_key, setting AHE_setting) gm.Matrix {
     u, err := SampleInt(setting.AHE_cryptosystem().N())
     if err != nil {panic(err)}
     setting.Distribute(u)
 
-    H, err := CPComputeHankelMatrix(items, u, setting.AHE_cryptosystem().N(), setting)
+    H, err := CPComputeHankelMatrix(items, u, setting)
     if err != nil {panic(err)}
     Hi := toMatrixSlice(setting.ReceiveAll())
     for _, Hv := range Hi {
@@ -778,17 +776,29 @@ func CentralCardinalityTestWorker(items []*big.Int, sk Secret_key, setting AHE_s
         if err != nil {panic(err)}
     }
     setting.Distribute(H)
+    return H
+}
+
+func OuterHankelMatrix(items []*big.Int, sk Secret_key, setting AHE_setting) gm.Matrix {
+    u := (setting.Receive()).(*big.Int)
+
+    H1, err := ComputeHankelMatrix(items, u, setting)
+    if err != nil {panic(err)}
+    setting.Send(H1)
+    H := (setting.Receive()).(gm.Matrix)
+    return H
+}
+
+// returns true if number of elements not shared by all is <= setting.Threshold()
+func CentralCardinalityTestWorker(items []*big.Int, sk Secret_key, setting AHE_setting) bool {
+    H := CentralHankelMatrix(items, sk, setting)
     
     return CentralSingularityTestWorker(H, sk, setting)
 }
 
 // returns true if number of elements not shared by all is <= setting.Threshold()
 func OuterCardinalityTestWorker(items []*big.Int, sk Secret_key, setting AHE_setting) bool {
-    u := (setting.Receive()).(*big.Int)
-    H1, err := ComputeHankelMatrix(items, u, setting)
-    if err != nil {panic(err)}
-    setting.Send(H1)
-    H := (setting.Receive()).(gm.Matrix)
+    H := OuterHankelMatrix(items, sk, setting)
 
     return OuterSingularityTestWorker(H, sk, setting)
 }
