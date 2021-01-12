@@ -7,11 +7,6 @@ import (
     "crypto/rand"
 )
 
-type PartialMatrix struct {
-    values []Partial_decryption
-    rows, cols int
-}
-
 func bigIntSlice(in []int64) []*big.Int {
     bin := make([]*big.Int, len(in))
     for i, v := range in {
@@ -181,7 +176,7 @@ func EncryptMatrix(a gm.Matrix, setting AHE_setting) (b gm.Matrix, err error) {
 }
 
 // perform partial decryption for key share Secret_key
-func PartialDecryptMatrix(cipher gm.Matrix, Secret_key Secret_key) (part_mat gm.Matrix, err error) { //todo: wrap in PartialMatrix?
+func PartialDecryptMatrix(cipher gm.Matrix, Secret_key Secret_key) (part_mat gm.Matrix, err error) {
     return cipher.Apply(func(plain interface{}) (enc interface{}, err error) {
         return Secret_key.PartialDecrypt(plain.(Ciphertext))
     })
