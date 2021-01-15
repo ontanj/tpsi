@@ -131,44 +131,17 @@ func TestEvaluation(t *testing.T) {
     }
 }
 
-func SetupTest() ([]FHESetting, []Secret_key) {
-    return SetupTestN(4)
-}
-
-func SetupTestN(n int) ([]FHESetting, []Secret_key) {
-    settings := make([]FHESetting, n)
-    channels := create_chans(n-1)
-    return_channels := create_chans(n)
-    
-    go func() {
-        pk, sk := CentralBFVEncryptionGenerator(channels)
-        return_channels[n-1] <- pk
-        return_channels[n-1] <- sk
-    }()
-        for i := 0; i < n-1; i += 1 {
-        go func(i int) {
-            pk, sk := OuterBFVEncryptionGenerator(channels[i])
-            return_channels[i] <- pk
-            return_channels[i] <- sk
-        }(i)
+func SetupTest(n, T int) ([]FHESetting, []BFV_secret_key) {
+    bfvcs, sks := SetupBFV(n)
+    cs := make([]FHE_Cryptosystem, n)
+    for i, c := range bfvcs {
+        cs[i] = c
     }
-    sk := make([]Secret_key, n)
-    for i, ch := range return_channels[:n-1] {
-        settings[i].cs = (<-ch).(BFV_encryption)
-        sk[i] = (<-ch).(Secret_key)
-        settings[i].n = n
-        settings[i].channel = channels[i]
-    }
-    settings[n-1].cs = (<-return_channels[n-1]).(BFV_encryption)
-    sk[n-1] = (<-return_channels[n-1]).(Secret_key)
-    settings[n-1].n = n
-    settings[n-1].channels = channels
-
-    return settings, sk
+    return SetupFHE(n, T, cs), sks
 }
 
 func TestInverse(t *testing.T) {
-    settings, sk := SetupTest()
+    settings, sk := SetupTest(4, -1)
     n := settings[0].Parties()
     
     t.Run("no factor", func(t *testing.T) {
@@ -238,7 +211,7 @@ func TestInverse(t *testing.T) {
 }
 
 func TestFHEZeroTest(t *testing.T) {
-    settings, sk := SetupTest()
+    settings, sk := SetupTest(4, -1)
     n := settings[0].Parties()
     
     t.Run("not zero", func(t *testing.T) {
@@ -291,11 +264,8 @@ func TestFHEZeroTest(t *testing.T) {
 
 func TestFHEInterpolation(t *testing.T) {
     t.Run("at threshold", func(t *testing.T) {
-        settings, sk := SetupTest()
-        n := settings[0].Parties()
-        for i := range settings {
-            settings[i].T = 1
-        }
+        n := 4
+        settings, sk := SetupTest(4, 1)
         mod := settings[0].cs.N()
         int_mod := mod.Int64()
         num := PolyFromRoots(bigIntSlice([]int64{2,6}), mod)
@@ -343,11 +313,8 @@ func TestFHEInterpolation(t *testing.T) {
         }
     })
     t.Run("below threshold", func(t *testing.T) {
-        settings, sk := SetupTest()
-        n := settings[0].Parties()
-        for i := range settings {
-            settings[i].T = 3
-        }
+        n := 4
+        settings, sk := SetupTest(n, 3)
         mod := settings[0].cs.N()
         int_mod := mod.Int64()
         num := PolyFromRoots(bigIntSlice([]int64{2,6}), mod)
@@ -397,12 +364,9 @@ func TestFHEInterpolation(t *testing.T) {
 }
                         
 func TestFHECardinalityTest(t *testing.T) {
-    settings, sk := SetupTestN(4)
+    settings, sk := SetupTest(4,4)
     n := settings[0].Parties()
     t.Run("passing cardinality test", func(t *testing.T) {
-        for i := range settings {
-            settings[i].T = 4
-        }
         ret := make(chan bool)
         items := [][]*big.Int{bigIntSlice([]int64{2,4,6,8,12,16,26}),
                               bigIntSlice([]int64{2,4,6,12,16,20,22}),
@@ -454,12 +418,9 @@ func TestTPSIint(t *testing.T) {
                           bigIntSlice([]int64{2,4,6,8,12,20,22})}
     n := 3
     t.Run("pass cardinality test", func(t *testing.T) {
-        settings, sks := SetupTestN(n)
+        settings, sks := SetupTest(n, 3)
         no_unique := 3
         no_shared := 4
-        for i := range settings {
-            settings[i].T = 3
-        }
         returns := make([]chan []*big.Int, n)
         for i := 0; i < n-1; i += 1 {
             returns[i] = make(chan []*big.Int)
@@ -501,10 +462,7 @@ func TestTPSIint(t *testing.T) {
         }
     })
     t.Run("fail cardinality test", func(t *testing.T) {
-        settings, sks := SetupTestN(n)
-        for i := range settings {
-            settings[i].T = 2
-        }
+        settings, sks := SetupTest(n, 2)
         returns := make([]chan []*big.Int, n)
         for i := 0; i < n-1; i += 1 {
             returns[i] = make(chan []*big.Int)

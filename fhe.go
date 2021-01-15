@@ -4,6 +4,24 @@ import (
     "math/big"
 )
 
+
+func SetupFHE(n, T int, cs []FHE_Cryptosystem) ([]FHESetting) {
+    settings := make([]FHESetting, n)
+    channels := create_chans(n-1)
+    for i := 0; i < n-1; i += 1 {
+        settings[i].cs = cs[i]
+        settings[i].n = n
+        settings[i].channel = channels[i]
+        settings[i].T = T
+    }
+    settings[n-1].cs = cs[n-1]
+    settings[n-1].n = n
+    settings[n-1].channels = channels
+    settings[n-1].T = T
+
+    return settings
+}
+
 func CentralInverseWorker(a Ciphertext, sk Secret_key, setting FHE_setting) Ciphertext {
     return CentralInverseWorkerWithFactor(a, big.NewInt(1), sk, setting)
 }

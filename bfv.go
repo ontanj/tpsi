@@ -39,7 +39,7 @@ func (pk BFV_encryption) Add(a, b Ciphertext) (sum Ciphertext, err error) {
 func (pk BFV_encryption) Scale(cipher Ciphertext, factor *big.Int) (product Ciphertext, err error) {
     val := cipher.(BFV_ciphertext)
     evaluator := bfv.NewEvaluator(pk.params)
-    prod := evaluator.MulScalarNew(val.msg, factor.Uint64())
+    prod := evaluator.MulScalarNew(val.msg, factor.Mod(factor, big.NewInt(int64(pk.params.T))).Uint64())
     return BFV_ciphertext{msg: prod, mult_counter: val.mult_counter}, nil
 }
 
@@ -81,7 +81,7 @@ func (pk BFV_encryption) Encrypt(a *big.Int) (Ciphertext, error) {
     encoder := bfv.NewEncoder(pk.params)
     encryptor := bfv.NewEncryptorFromPk(pk.params, pk.pk)
     pt := bfv.NewPlaintext(pk.params)
-    encoder.EncodeUint([]uint64{a.Uint64()}, pt)
+    encoder.EncodeUint([]uint64{a.Mod(a, big.NewInt(int64(pk.params.T))).Uint64()}, pt)
     cipher := encryptor.EncryptNew(pt)
     return BFV_ciphertext{msg: cipher, mult_counter: 0}, nil
 }
@@ -155,8 +155,11 @@ func (pk BFV_eval_space) Add(a, b interface{}) (interface{}, error) {
 }
 
 func (pk BFV_eval_space) Subtract(a, b interface{}) (diff interface{}, err error) {
-    neg, _ := pk.BFV_encryption.Scale(b, big.NewInt(-1))
-    return pk.Add(a, neg)
+    ac := a.(BFV_ciphertext)
+    bc := b.(BFV_ciphertext)
+    evaluator := bfv.NewEvaluator(pk.BFV_encryption.params)
+    res := evaluator.SubNew(ac.msg, bc.msg)
+    return BFV_ciphertext{msg: res, mult_counter: mulMax(ac, bc)}, nil
 }
 
 func (pk BFV_eval_space) Multiply(a, b interface{}) (product interface{}, err error) {
@@ -359,4 +362,30 @@ func OuterRefresh(cipher BFV_ciphertext, pk BFV_encryption) BFV_ciphertext {
     newCipher := (<-pk.channel).(*bfv.Ciphertext)
     
     return BFV_ciphertext{msg: newCipher, mult_counter: 0}
+}
+
+func SetupBFV(n int) ([]BFV_encryption, []BFV_secret_key) {
+    channels := create_chans(n-1)
+    sk_chan := make(chan BFV_secret_key)
+    pk_chan := make(chan BFV_encryption, n)
+    
+    go func() {
+        pk, sk := CentralBFVEncryptionGenerator(channels)
+        sk_chan <- sk
+        pk_chan <- pk
+    }()
+        for i := 0; i < n-1; i += 1 {
+        go func(i int) {
+            pk, sk := OuterBFVEncryptionGenerator(channels[i])
+            sk_chan <- sk
+            pk_chan <- pk
+        }(i)
+    }
+    sks := make([]BFV_secret_key, n)
+    pk := make([]BFV_encryption, n)
+    for i := 0; i < n; i += 1 {
+        sks[i] = <-sk_chan
+        pk[i] = <-pk_chan
+    }
+    return pk, sks
 }

@@ -6,15 +6,6 @@ import (
     gm "github.com/ontanj/generic-matrix"
 )
 
-// create a slice of n chan interface{}
-func create_chans(n int) []chan interface{} {
-    channels := make([]chan interface{}, n)
-    for i := 0; i < n; i += 1 {
-        channels[i] = make(chan interface{})
-    }
-    return channels
-}
-
 func createAHESettings(n, T int, cs AHE_Cryptosystem) []AHESetting {
     settings := make([]AHESetting, n)
     channels := create_chans(n-1)

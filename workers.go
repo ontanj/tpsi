@@ -226,7 +226,7 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
     space := a.Space
     var la int // degree of dividend
     for la = a.Cols-1; la >= 0; la -= 1 { // find degree of divisor
-        zero_t, err := decodeBI(a.At(0,la))
+        zero_t, err := decodeC(a.At(0,la))
         if err != nil {panic(err)}
         if !zeroTest(zero_t) {
             break
@@ -234,7 +234,7 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
     }
     var lb int // degree of divisor
     for lb = b.Cols-1; lb >= 0; lb -= 1 { // find degree of divisor
-        zero_t, err := decodeBI(b.At(0,lb))
+        zero_t, err := decodeC(b.At(0,lb))
         if err != nil {panic(err)}
         if !zeroTest(zero_t) {
             break
@@ -262,7 +262,7 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
     
     for i := la; i >= lb; i -= 1 { // start at highest degree coefficient, go until dividend smaller than divisor
         // skip 0 coefficents
-        zero_t, err := decodeBI(a_num.At(0,i))
+        zero_t, err := decodeC(a_num.At(0,i))
         if err != nil {panic(err)}
         if zeroTest(zero_t) {
             continue
@@ -271,13 +271,13 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
         pos := i-lb // entry in q at pos
 
         // q numerator: b_den * a_num
-        a_val, err := decodeBI(a_num.At(0, i))
+        a_val, err := decodeC(a_num.At(0, i))
         if err != nil {panic(err)}
         num := multiply(a_val, b_den)
         q_num.Set(0, pos, num)
-
+    
         // q denominator: b_num * a_den
-        b_val, err := decodeBI(b.At(0, lb))
+        b_val, err := decodeC(b.At(0, lb))
         if err != nil {panic(err)}
         den := multiply(b_val, a_den)
         q_den.Set(0, pos, den)
@@ -286,7 +286,7 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
         p_num, err := gm.NewMatrix(1, lb, nil, a.Space) // partial result, size is degree of (partial) dividend - 1 = i , skip highest coefficient as it is cancelling
         if err != nil {panic(err)}
         for j := 0; j < lb; j += 1 {
-            b_val, err := decodeBI(b.At(0, j))
+            b_val, err := decodeC(b.At(0, j))
             if err != nil {panic(err)}
             val := multiply(num, b_val)
             p_num.Set(0, j, val)
@@ -297,13 +297,13 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
         r_num, err := gm.NewMatrix(1, i, nil, space)
         if err != nil {panic(err)}
         for i := 0; i < r_num.Cols; i += 1 {
-            a_val, err := decodeBI(a_num.At(0, i))
+            a_val, err := decodeC(a_num.At(0, i))
             if err != nil {panic(err)}
             val := multiply(a_val, p_den)
             r_num.Set(0, i, val)
         }
         for i := 0; i < p_num.Cols; i += 1 {
-            p_val, err := decodeBI(p_num.At(0, i))
+            p_val, err := decodeC(p_num.At(0, i))
             if err != nil {panic(err)}
             val := multiply(p_val, a_den)
             p_num.Set(0, i, val)
@@ -326,7 +326,7 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
     // remove initial zero coefficients
     var lr int
     for lr = a_num.Cols-1; lr >= 0; lr -=1 {
-        zero_t, err := decodeBI(a_num.At(0,lr))
+        zero_t, err := decodeC(a_num.At(0,lr))
         if err != nil {panic(err)}
         if !zeroTest(zero_t) {
             break
@@ -347,11 +347,11 @@ func PolynomialDivisionWorker(a, b gm.Matrix, a_den, b_den Ciphertext, sk Secret
 func divSub(r, p gm.Matrix,setting AHE_setting) gm.Matrix {
     pos_diff := r.Cols-p.Cols
     for i := 0; i < p.Cols; i += 1 {
-        p_val, err := decodeBI(p.At(0,i))
+        p_val, err := decodeC(p.At(0,i))
         if err != nil {panic(err)}
         neg, err := setting.AHE_cryptosystem().Scale(p_val, big.NewInt(-1))
         if err != nil {panic(err)}
-        r_val, err := decodeBI(r.At(0, i+pos_diff))
+        r_val, err := decodeC(r.At(0, i+pos_diff))
         if err != nil {panic(err)}
         diff, err := setting.AHE_cryptosystem().Add(r_val, neg)
         if err != nil {panic(err)}
@@ -506,27 +506,27 @@ func PolySub(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting AHE_se
             if err != nil {return}
             diff_den.Set(0, i, a_val)
         } else if i >= a_num.Cols {
-            var b_val *big.Int
-            b_val, err = decodeBI(b_num.At(0, i))
+            var b_val Ciphertext
+            b_val, err = decodeC(b_num.At(0, i))
             if err != nil {return}
             num = scale(b_val, big.NewInt(-1))
             diff_num.Set(0, i, num)
-            b_val, err = decodeBI(b_den.At(0, i))
+            b_val, err = decodeC(b_den.At(0, i))
             if err != nil {return}
             diff_den.Set(0, i, b_val)
         } else {
-            var a_num_val *big.Int
-            a_num_val, err = decodeBI(a_num.At(0, i))
+            var a_num_val Ciphertext
+            a_num_val, err = decodeC(a_num.At(0, i))
             if err != nil {return}
-            var b_den_val *big.Int
-            b_den_val, err = decodeBI(b_den.At(0, i))
+            var b_den_val Ciphertext
+            b_den_val, err = decodeC(b_den.At(0, i))
             if err != nil {return}
             long_a_num := multiply(a_num_val, b_den_val)
-            var b_num_val *big.Int
-            b_num_val, err = decodeBI(b_num.At(0, i))
+            var b_num_val Ciphertext
+            b_num_val, err = decodeC(b_num.At(0, i))
             if err != nil {return}
-            var a_den_val *big.Int
-            a_den_val, err = decodeBI(a_den.At(0, i))
+            var a_den_val Ciphertext
+            a_den_val, err = decodeC(a_den.At(0, i))
             if err != nil {return}
             long_b_num := multiply(b_num_val, a_den_val)
             neg := scale(long_b_num, big.NewInt(-1))
@@ -565,26 +565,26 @@ func PolyMult(a_num, a_den, b_num, b_den gm.Matrix, sk Secret_key, setting AHE_s
     }
     for i := 0; i < a_num.Cols; i += 1 {
         for j := 0; j < b_num.Cols; j += 1 {
-            var a_num_val *big.Int
-            a_num_val, err = decodeBI(a_num.At(0,i))
+            var a_num_val Ciphertext
+            a_num_val, err = decodeC(a_num.At(0,i))
             if err != nil {return}
-            var b_num_val *big.Int
-            b_num_val, err = decodeBI(b_num.At(0,j))
+            var b_num_val Ciphertext
+            b_num_val, err = decodeC(b_num.At(0,j))
             if err != nil {return}
             num := multiply(a_num_val, b_num_val)
-            var current_num *big.Int
-            current_num, err = decodeBI(prod_num.At(0, i+j))
+            var current_num Ciphertext
+            current_num, err = decodeC(prod_num.At(0, i+j))
             if err != nil {return}
             
-            var a_den_val *big.Int
-            a_den_val, err = decodeBI(a_den.At(0,i))
+            var a_den_val Ciphertext
+            a_den_val, err = decodeC(a_den.At(0,i))
             if err != nil {return}
-            var b_den_val *big.Int
-            b_den_val, err = decodeBI(b_den.At(0,j))
+            var b_den_val Ciphertext
+            b_den_val, err = decodeC(b_den.At(0,j))
             if err != nil {return}
             den := multiply(a_den_val, b_den_val)
-            var current_den *big.Int
-            current_den, err = decodeBI(prod_den.At(0, i+j))
+            var current_den Ciphertext
+            current_den, err = decodeC(prod_den.At(0, i+j))
             if err != nil {return}
             
             long_num := multiply(num, current_den)
@@ -725,7 +725,7 @@ func CentralSingularityTestWorker(m gm.Matrix, sk Secret_key, setting AHE_settin
     rec_ord := m.Cols
     min_poly, _ := CentralMinPolyWorker(seq, rec_ord, sk, setting)
     
-    zero_t, err := decodeBI(min_poly.At(0,0))
+    zero_t, err := decodeC(min_poly.At(0,0))
     if err != nil {panic(err)}
     return CentralZeroTestWorker(zero_t, sk, setting)
 }
@@ -758,7 +758,7 @@ func OuterSingularityTestWorker(m gm.Matrix, sk Secret_key, setting AHE_setting)
     rec_ord := m.Cols
     min_poly, _ := OuterMinPolyWorker(seq, rec_ord, sk, setting)
 
-    zero_t, err := decodeBI(min_poly.At(0,0))
+    zero_t, err := decodeC(min_poly.At(0,0))
     if err != nil {panic(err)}
     return OuterZeroTestWorker(zero_t, sk, setting)
 }

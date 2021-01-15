@@ -7,6 +7,15 @@ import (
     "crypto/rand"
 )
 
+// create a slice of n chan interface{}
+func create_chans(n int) []chan interface{} {
+    channels := make([]chan interface{}, n)
+    for i := 0; i < n; i += 1 {
+        channels[i] = make(chan interface{})
+    }
+    return channels
+}
+
 func bigIntSlice(in []int64) []*big.Int {
     bin := make([]*big.Int, len(in))
     for i, v := range in {
@@ -32,6 +41,39 @@ func elMulSlice(sl1, sl2 []*big.Int, q *big.Int) []*big.Int {
         slProd[i].Mul(sl1[i], sl2[i]).Mod(slProd[i], q)
     }
     return slProd
+}
+
+func SetupAHE(n, T int, cs AHE_Cryptosystem) ([]AHESetting) {
+    settings := make([]AHESetting, n)
+    channels := create_chans(n-1)
+    for i := 0; i < n-1; i += 1 {
+        settings[i].cs = cs
+        settings[i].n = n
+        settings[i].channel = channels[i]
+        settings[i].T = T
+    }
+    settings[n-1].cs = cs
+    settings[n-1].n = n
+    settings[n-1].channels = channels
+    settings[n-1].T = T
+
+    return settings
+}
+
+func EncodeElements(elements []*big.Int) []*big.Int {
+    new_elements := make([]*big.Int, len(elements))
+    for i, e := range elements {
+        new_elements[i] = new(big.Int).Mul(e, big.NewInt(2))
+    }
+    return new_elements
+}
+
+func DecodeElements(elements []*big.Int) []*big.Int {
+    new_elements := make([]*big.Int, len(elements))
+    for i, e := range elements {
+        new_elements[i] = new(big.Int).Div(e, big.NewInt(2))
+    }
+    return new_elements
 }
 
 // sample a uniform random integer smaller than q
