@@ -58,7 +58,7 @@ func NewDJCryptosystem(n int) (cryptosystem DJ_encryption, secret_keys []DJ_secr
 }
 
 func NewCustomDJCryptosystem(n, bitSize, s int) (cryptosystem DJ_encryption, secret_keys []DJ_secret_key, err error) {
-    tcsks, tcpk, err := GenerateKeys(bitSize, s, n)
+    tcsks, tcpk, err := tcpaillier.NewKey(bitSize, uint8(s), uint8(n), uint8(n))
     if err != nil {return}
     cryptosystem = DJ_encryption{gm.DJ_public_key{PubKey: tcpk}}
     secret_keys = make([]DJ_secret_key, n)
