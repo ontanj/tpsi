@@ -24,7 +24,7 @@ func main() {
     css := os.Args[2]
     T, err := strconv.Atoi(os.Args[3])
     if err != nil {
-        fmt.Println("Error when parsing T")
+        fmt.Printf("Error when parsing T: %v\n", os.Args[3])
         os.Exit(1)
     }
     elements := parseElementfile(os.Args[4])
